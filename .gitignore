@@ -1,0 +1,33 @@
+# Environment variables (secrets)
+.env
+.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+venv/
+env/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# ChromaDB persistence
+chroma_db/
+*.db
+
+# Node / Frontend
+node_modules/
+dist/
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# IDE
+.idea/
+.vscode/
