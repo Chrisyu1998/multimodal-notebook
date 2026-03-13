@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+chromadb
+google-generativeai
+pymupdf
+python-multipart
+python-dotenv
+rank-bm25
+pillow
+loguru

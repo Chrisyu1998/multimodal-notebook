@@ -19,6 +19,9 @@ build/
 chroma_db/
 *.db
 
+# Temp uploads
+tmp/
+
 # Node / Frontend
 node_modules/
 dist/
