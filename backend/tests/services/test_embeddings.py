@@ -334,13 +334,12 @@ class TestEmbedMediaBatch:
 
 
 # ---------------------------------------------------------------------------
-# embed_chunks — single-file types (video, audio, document)
+# embed_chunks — single-file types (video, audio) — 1 call per chunk
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("chunk_type,expected_mime", [
-    ("video",    "video/mp4"),
-    ("audio",    "audio/mp3"),
-    ("document", "application/pdf"),
+    ("video", "video/mp4"),
+    ("audio", "audio/mp3"),
 ])
 class TestEmbedChunksSingleFileTypes:
     def test_embedding_added(self, chunk_type, expected_mime):
@@ -374,6 +373,59 @@ class TestEmbedChunksSingleFileTypes:
             emb.embed_chunks(chunks)
 
         assert sorted(call_sizes) == [1, 1, 1]
+
+
+# ---------------------------------------------------------------------------
+# embed_chunks — document chunks — batched up to 100 per call
+# ---------------------------------------------------------------------------
+
+class TestEmbedChunksDocument:
+    def test_embedding_added(self):
+        chunk = make_media_chunk("document", 0)
+        with patch.object(emb._client.models, "embed_content", side_effect=capture_parts_call):
+            result = emb.embed_chunks([chunk])
+        assert "embedding" in result[0]
+
+    def test_correct_mime_type_sent(self):
+        chunk = make_media_chunk("document", 0)
+        received = []
+
+        def capture(model, contents):  # noqa: ARG001
+            received.append(contents)
+            return embed_response(fake_vector())
+
+        with patch.object(emb._client.models, "embed_content", side_effect=capture):
+            emb.embed_chunks([chunk])
+
+        assert received[0][0].inline_data.mime_type == "application/pdf"
+
+    def test_batched_in_single_call(self):
+        """3 document chunks must be sent in one API call, not three."""
+        chunks = [make_media_chunk("document", i) for i in range(3)]
+        call_sizes: list[int] = []
+
+        def capture(model, contents):  # noqa: ARG001
+            call_sizes.append(len(contents))
+            return embed_response(fake_vector())
+
+        with patch.object(emb._client.models, "embed_content", side_effect=capture):
+            emb.embed_chunks(chunks)
+
+        assert call_sizes == [3]
+
+    def test_batch_splits_at_100(self):
+        """101 document chunks must produce exactly 2 API calls (100 + 1)."""
+        chunks = [make_media_chunk("document", i) for i in range(101)]
+        call_sizes: list[int] = []
+
+        def capture(model, contents):  # noqa: ARG001
+            call_sizes.append(len(contents))
+            return embed_response(fake_vector())
+
+        with patch.object(emb._client.models, "embed_content", side_effect=capture):
+            emb.embed_chunks(chunks)
+
+        assert sorted(call_sizes) == [1, 100]
 
 
 # ---------------------------------------------------------------------------

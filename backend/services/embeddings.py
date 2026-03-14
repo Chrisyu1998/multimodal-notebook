@@ -6,7 +6,8 @@ Key rules:
 - embed_text: single string, used only for query embedding at search time
 - embed_chunks: handles image, video, audio, and document chunks
   - Images: batched up to 6 per request (hard API limit)
-  - Video / audio / document: 1 per request (hard API limit), all concurrent
+  - Documents: batched up to 100 per request (hard API limit, empirically verified)
+  - Video / audio: 1 per request, all concurrent
 - Transient errors (429, 5xx, unknown) are retried with exponential backoff
 - Permanent errors (4xx except 429) fail immediately — no wasted retries
 - Failures raise EmbeddingBatchError with chunk_type + indices for checkpointing
@@ -24,12 +25,13 @@ import backend.config as config
 
 _client = genai.Client(api_key=config.GEMINI_API_KEY)
 
-_IMAGE_BATCH_SIZE = config.EMBEDDING_IMAGE_BATCH_SIZE  # 6 — hard API limit
+_IMAGE_BATCH_SIZE = config.EMBEDDING_IMAGE_BATCH_SIZE      # 6 — hard API limit
+_DOCUMENT_BATCH_SIZE = config.EMBEDDING_DOCUMENT_BATCH_SIZE  # 100 — hard API limit (tested)
 _MAX_RETRIES = config.EMBEDDING_MAX_RETRIES
 _MAX_WORKERS = config.EMBEDDING_MAX_WORKERS
 
 # Types that must be sent one per API request
-_SINGLE_FILE_TYPES = {"video", "audio", "document"}
+_SINGLE_FILE_TYPES = {"video", "audio"}
 
 # Maps chunk type → bytes field name
 _MEDIA_BYTES_FIELD: dict[str, str] = {
@@ -98,12 +100,15 @@ def embed_chunks(chunks: list[dict]) -> list[dict]:
     logger.info(f"Embedding {len(chunks)} chunks with {config.EMBEDDING_MODEL}…")
 
     image_items: list[tuple[int, dict]] = []
+    document_items: list[tuple[int, dict]] = []
     single_items: list[tuple[int, dict]] = []
 
     for i, chunk in enumerate(chunks):
         chunk_type = chunk.get("type")
         if chunk_type == "image":
             image_items.append((i, chunk))
+        elif chunk_type == "document":
+            document_items.append((i, chunk))
         elif chunk_type in _SINGLE_FILE_TYPES:
             single_items.append((i, chunk))
         else:
@@ -112,13 +117,19 @@ def embed_chunks(chunks: list[dict]) -> list[dict]:
     futures: dict = {}
 
     with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as executor:
-        # Images — up to 6 per call
+        # Images — up to 6 per call (hard API limit)
         for batch_start in range(0, len(image_items), _IMAGE_BATCH_SIZE):
             batch = image_items[batch_start : batch_start + _IMAGE_BATCH_SIZE]
             future = executor.submit(_embed_media_batch, batch)
             futures[future] = ("image", batch)
 
-        # Video / audio / document — exactly 1 per call, all concurrent
+        # Documents — up to 100 per call (hard API limit, tested)
+        for batch_start in range(0, len(document_items), _DOCUMENT_BATCH_SIZE):
+            batch = document_items[batch_start : batch_start + _DOCUMENT_BATCH_SIZE]
+            future = executor.submit(_embed_media_batch, batch)
+            futures[future] = ("document", batch)
+
+        # Video / audio — exactly 1 per call, all concurrent
         for i, chunk in single_items:
             future = executor.submit(_embed_media_batch, [(i, chunk)])
             futures[future] = (chunk["type"], [(i, chunk)])
@@ -197,6 +208,9 @@ def _extract_status_code(exc: Exception) -> Optional[int]:
     """
     if isinstance(exc, OSError):
         return None
+    # google-genai SDK uses .code; other HTTP clients use .status_code
+    if hasattr(exc, "code") and isinstance(exc.code, int):
+        return exc.code
     if hasattr(exc, "status_code") and isinstance(exc.status_code, int):
         return exc.status_code
     grpc_to_http = {8: 429, 13: 500, 14: 503}

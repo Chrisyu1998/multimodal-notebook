@@ -13,9 +13,9 @@ from loguru import logger
 
 import backend.config as config
 from backend.models.schemas import UploadResponse
+from backend.services import chunking, embeddings, vectorstore
 
-# TODO: import services once implemented
-# from backend.services import chunking, embeddings, vectorstore, bm25_index
+# TODO: from backend.services import bm25_index (not yet implemented)
 
 router = APIRouter()
 
@@ -64,17 +64,30 @@ async def upload_file(file: UploadFile = File(...)) -> UploadResponse:
     logger.info(f"Saved {size_bytes} bytes → {dest}")
 
     # TODO (Week 1): compute SHA-256; skip ingestion if already indexed
-    # TODO (Week 1): dispatch chunker based on suffix
-    #   if suffix == ".pdf":   chunks = chunking.chunk_pdf(str(dest))
-    #   elif suffix in image_exts: chunks = chunking.chunk_image(str(dest))
-    #   elif suffix in video_exts: chunks = chunking.chunk_video(str(dest))
-    # TODO (Week 1): chunks = embeddings.embed_chunks(chunks)
-    # TODO (Week 1): vectorstore.add_chunks(chunks)
-    # TODO (Week 1): bm25_index.build_index(chunks)
 
-    return UploadResponse(
-        file_id=file_id,
-        filename=file.filename,
-        size_bytes=size_bytes,
-        status="uploaded",
-    )
+    try:
+        if suffix == ".pdf":
+            chunks = chunking.chunk_pdf(str(dest))
+        elif suffix in {".png", ".jpg", ".jpeg", ".webp"}:
+            chunks = chunking.chunk_image(str(dest))
+        else:  # .mp4, .mov
+            chunks = chunking.chunk_video(str(dest))
+
+        chunks = embeddings.embed_chunks(chunks)
+        vectorstore.add_chunks(chunks)
+        # TODO (Week 1): bm25_index.build_index(chunks)
+
+        return UploadResponse(
+            file_id=file_id,
+            filename=file.filename,
+            size_bytes=size_bytes,
+            status="indexed",
+        )
+    except Exception as exc:
+        logger.error(f"Ingestion failed for {file.filename!r}: {exc}")
+        return UploadResponse(
+            file_id=file_id,
+            filename=file.filename,
+            size_bytes=size_bytes,
+            status="upload_failed_to_index",
+        )

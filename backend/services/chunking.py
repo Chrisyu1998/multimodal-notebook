@@ -138,12 +138,26 @@ def chunk_pdf(filepath: str) -> list[dict]:
     current_tokens = 0
     prev_heading: Optional[str] = None
 
+    # These tokens never appear in real prose — any occurrence means the chunk
+    # is from a diagram or attention visualization, not readable text.
+    _JUNK_TOKENS: frozenset[str] = frozenset({"<EOS>", "<pad>", "<unk>", "<s>", "</s>", "<mask>"})
+
     def flush(paras: list[tuple[int, str, str]]) -> None:
         """Build a chunk dict from paras and append to chunks."""
         nonlocal chunk_index
         if not paras:
             return
         chunk_text = "\n\n".join(p for _, p, _ in paras)
+
+        # Skip chunks containing any special tokens (e.g. attention visualizations)
+        if any(tok in chunk_text for tok in _JUNK_TOKENS):
+            logger.warning(
+                f"chunk_pdf: skipping chunk {chunk_index} — "
+                f"contains special tokens (page {paras[0][0]})"
+            )
+            chunk_index += 1
+            return
+
         page_num = paras[0][0]
         section_heading = paras[0][2]
         chunk_to_embed = f"Doc: {title} | Section: {section_heading}\n\n{chunk_text}"

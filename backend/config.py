@@ -49,7 +49,8 @@ GEMINI_API_KEY: str = _require("GEMINI_API_KEY")
 
 EMBEDDING_MODEL: str = "gemini-embedding-2-preview"  # natively multimodal
 EMBEDDING_BATCH_SIZE: int = _optional_int("EMBEDDING_BATCH_SIZE", 20)
-EMBEDDING_IMAGE_BATCH_SIZE: int = _optional_int("EMBEDDING_IMAGE_BATCH_SIZE", 6)  # hard API limit
+EMBEDDING_IMAGE_BATCH_SIZE: int = _optional_int("EMBEDDING_IMAGE_BATCH_SIZE", 6)        # hard API limit
+EMBEDDING_DOCUMENT_BATCH_SIZE: int = _optional_int("EMBEDDING_DOCUMENT_BATCH_SIZE", 100)  # hard API limit, empirically verified
 EMBEDDING_MAX_RETRIES: int = _optional_int("EMBEDDING_MAX_RETRIES", 3)
 EMBEDDING_MAX_WORKERS: int = _optional_int("EMBEDDING_MAX_WORKERS", 8)
 EMBEDDING_RETRYABLE_STATUS_CODES: frozenset[int] = frozenset({429, 500, 502, 503, 504})
