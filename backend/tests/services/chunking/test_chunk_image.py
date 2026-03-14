@@ -33,16 +33,17 @@ _GLOBAL_KEYS = {
 }
 _LOCAL_KEYS = {
     "type", "image_bytes", "text", "source", "page", "chunk_index",
-    "modality", "region_type", "crop_bbox", "parent_image_id",
+    "modality", "region_type", "label", "crop_bbox", "parent_image_id",
     "width_px", "height_px", "crop_bbox_normalized",
 }
 
+# Pixel coords for a 200×100 image (default _make_image_file size)
 _TWO_REGIONS = json.dumps([
-    {"region_type": "table",   "bbox": [0.0, 0.0, 0.5, 0.5]},
-    {"region_type": "diagram", "bbox": [0.5, 0.5, 1.0, 1.0]},
+    {"region_type": "table",   "label": "left half",   "bbox": [0,  0,  100, 50]},
+    {"region_type": "diagram", "label": "right half",  "bbox": [100, 50, 200, 100]},
 ])
 _ONE_REGION = json.dumps([
-    {"region_type": "chart", "bbox": [0.1, 0.1, 0.9, 0.9]},
+    {"region_type": "chart", "label": "centre", "bbox": [20, 10, 180, 90]},
 ])
 
 
@@ -62,9 +63,15 @@ def _make_image_file(
 
 
 def _make_response(text: str) -> MagicMock:
-    """Return a mock that quacks like a Gemini generate_content response."""
+    """Return a mock that quacks like a Gemini generate_content response.
+
+    Simulates the parts-based response shape used by thinking models so that
+    the ``candidates[0].content.parts`` iteration in chunk_image works correctly.
+    """
+    part = MagicMock()
+    part.text = text
     mock = MagicMock()
-    mock.text = text
+    mock.candidates[0].content.parts = [part]
     return mock
 
 
@@ -259,8 +266,8 @@ class TestLocalChunkSchema:
     def test_crop_dimensions_match_bbox(self):
         """width_px and height_px must match the actual cropped image size."""
         path = _make_image_file(width=200, height=100)
-        # bbox covers left half: x1=0.0, y1=0.0, x2=0.5, y2=1.0 → 100×100 crop
-        region = json.dumps([{"region_type": "table", "bbox": [0.0, 0.0, 0.5, 1.0]}])
+        # pixel bbox: left half → 100×100 crop
+        region = json.dumps([{"region_type": "table", "label": "left half", "bbox": [0, 0, 100, 100]}])
         try:
             with _patch_gemini(region):
                 chunks = chunk_image(path)
@@ -272,7 +279,7 @@ class TestLocalChunkSchema:
 
     def test_crop_bbox_pixel_coords_correct(self):
         path = _make_image_file(width=200, height=100)
-        region = json.dumps([{"region_type": "chart", "bbox": [0.25, 0.5, 0.75, 1.0]}])
+        region = json.dumps([{"region_type": "chart", "label": "centre", "bbox": [50, 50, 150, 100]}])
         try:
             with _patch_gemini(region):
                 chunks = chunk_image(path)
@@ -292,14 +299,15 @@ class TestLocalChunkSchema:
         finally:
             os.unlink(path)
 
-    def test_crop_bbox_normalized_matches_gemini_output(self):
-        path = _make_image_file()
-        bbox = [0.1, 0.2, 0.8, 0.9]
-        region = json.dumps([{"region_type": "figure", "bbox": bbox}])
+    def test_crop_bbox_normalized_derived_from_pixel_coords(self):
+        """crop_bbox_normalized must be pixel coords divided by image dimensions."""
+        path = _make_image_file(width=200, height=100)
+        # [20, 10, 180, 90] → [0.1, 0.1, 0.9, 0.9]
+        region = json.dumps([{"region_type": "figure", "label": "main", "bbox": [20, 10, 180, 90]}])
         try:
             with _patch_gemini(region):
                 chunks = chunk_image(path)
-            assert chunks[1]["crop_bbox_normalized"] == bbox
+            assert chunks[1]["crop_bbox_normalized"] == [0.1, 0.1, 0.9, 0.9]
         finally:
             os.unlink(path)
 
@@ -370,7 +378,7 @@ class TestRegionCount:
     def test_region_count_reflects_skipped_bad_regions(self):
         """If one of two regions is malformed, region_count must be 1, not 2."""
         mixed = json.dumps([
-            {"region_type": "table", "bbox": [0.0, 0.0, 0.5, 0.5]},
+            {"region_type": "table", "label": "top left", "bbox": [0, 0, 100, 50]},
             {"region_type": "bad",   "bbox": "not-a-list"},          # will fail int() conversion
         ])
         path = _make_image_file()
@@ -432,7 +440,7 @@ class TestStream2Fallback:
         """A malformed region must not abort processing of subsequent valid ones."""
         regions = json.dumps([
             {"region_type": "bad",   "bbox": "not-a-list"},
-            {"region_type": "chart", "bbox": [0.5, 0.5, 1.0, 1.0]},
+            {"region_type": "chart", "label": "right half", "bbox": [100, 50, 200, 100]},
         ])
         path = _make_image_file()
         try:
@@ -479,14 +487,30 @@ class TestFormatValidation:
         finally:
             os.unlink(path)
 
-    def test_unsupported_format_raises_value_error(self):
+    def test_non_png_jpeg_format_is_converted_and_accepted(self):
+        """BMP/WEBP/etc. must be silently converted to PNG rather than rejected."""
         img = Image.new("RGB", (50, 50), color=(0, 0, 0))
         tmp = tempfile.NamedTemporaryFile(suffix=".bmp", delete=False)
         img.save(tmp.name, format="BMP")
         tmp.close()
         try:
-            with pytest.raises(ValueError, match="unsupported format"):
-                chunk_image(tmp.name)
+            with _patch_gemini(_ONE_REGION):
+                chunks = chunk_image(tmp.name)
+            assert len(chunks) >= 1
+            assert chunks[0]["modality"] == "image_global"
+        finally:
+            os.unlink(tmp.name)
+
+    def test_webp_format_is_converted_and_accepted(self):
+        """WEBP files (even with .png extension) must be converted and accepted."""
+        img = Image.new("RGB", (50, 50), color=(255, 0, 0))
+        tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+        img.save(tmp.name, format="WEBP")
+        tmp.close()
+        try:
+            with _patch_gemini(_ONE_REGION):
+                chunks = chunk_image(tmp.name)
+            assert len(chunks) >= 1
         finally:
             os.unlink(tmp.name)
 
@@ -541,5 +565,95 @@ class TestReturnStructure:
                 chunk_image(path)
         except AttributeError:
             pass  # embed_chunks not imported in chunking.py — also fine
+        finally:
+            os.unlink(path)
+
+
+# ---------------------------------------------------------------------------
+# Bbox pixel clamping
+# ---------------------------------------------------------------------------
+
+class TestBboxClamping:
+    def test_coords_clamped_to_image_bounds(self):
+        """Out-of-bounds pixel coords must be clamped rather than raising."""
+        path = _make_image_file(width=200, height=100)
+        # x2=250 and y2=150 exceed image dimensions — must be clamped to 200/100
+        region = json.dumps([
+            {"region_type": "chart", "label": "oversized", "bbox": [-10, -5, 250, 150]},
+        ])
+        try:
+            with _patch_gemini(region):
+                chunks = chunk_image(path)
+            local = chunks[1]
+            assert local["crop_bbox"] == [0, 0, 200, 100]
+            assert local["width_px"] == 200
+            assert local["height_px"] == 100
+        finally:
+            os.unlink(path)
+
+    def test_pixel_coords_used_directly(self):
+        """Pixel bbox values must be used as-is (no fraction conversion)."""
+        path = _make_image_file(width=200, height=100)
+        region = json.dumps([{"region_type": "table", "label": "quarter", "bbox": [50, 0, 150, 100]}])
+        try:
+            with _patch_gemini(region):
+                chunks = chunk_image(path)
+            local = chunks[1]
+            assert local["crop_bbox"] == [50, 0, 150, 100]
+        finally:
+            os.unlink(path)
+
+    def test_slightly_oob_region_is_rescued(self):
+        """A bbox with y2 up to 25% over img_height must be rescaled and recovered."""
+        # img 200×100; y2=120 is 20% over → scale_y=100/120=0.833 → rescued
+        path = _make_image_file(width=200, height=100)
+        region = json.dumps([{"region_type": "pipeline_strip", "label": "bottom row", "bbox": [0, 83, 200, 120]}])
+        try:
+            with _patch_gemini(region):
+                chunks = chunk_image(path)
+            assert len(chunks) == 2   # rescued, not dropped
+            assert chunks[1]["crop_bbox"][3] == 100  # y2 clamped to img_height
+        finally:
+            os.unlink(path)
+
+    def test_severely_oob_region_is_dropped(self):
+        """A bbox with y2 more than 25% over img_height must be dropped."""
+        # img 200×100; y2=200 is 100% over → scale_y=0.5 < 0.75 → dropped
+        path = _make_image_file(width=200, height=100)
+        region = json.dumps([{"region_type": "pipeline_strip", "label": "ghost row", "bbox": [0, 150, 200, 200]}])
+        try:
+            with _patch_gemini(region):
+                chunks = chunk_image(path)
+            assert len(chunks) == 1   # only global, local was dropped
+        finally:
+            os.unlink(path)
+
+
+# ---------------------------------------------------------------------------
+# Deduplication
+# ---------------------------------------------------------------------------
+
+class TestDeduplication:
+    def test_duplicate_bboxes_produce_single_chunk(self):
+        """Two regions with identical bboxes must result in only one local chunk."""
+        dupes = json.dumps([
+            {"region_type": "diagram", "label": "panel", "bbox": [10, 10, 180, 90]},
+            {"region_type": "diagram", "label": "panel", "bbox": [10, 10, 180, 90]},
+        ])
+        path = _make_image_file()
+        try:
+            with _patch_gemini(dupes):
+                chunks = chunk_image(path)
+            assert len(chunks) == 2   # 1 global + 1 deduplicated local
+        finally:
+            os.unlink(path)
+
+    def test_distinct_bboxes_all_kept(self):
+        """Regions with different bboxes must all be preserved."""
+        path = _make_image_file()
+        try:
+            with _patch_gemini(_TWO_REGIONS):
+                chunks = chunk_image(path)
+            assert len(chunks) == 3   # 1 global + 2 distinct locals
         finally:
             os.unlink(path)

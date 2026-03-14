@@ -101,7 +101,7 @@ context precision, latency (p50/p95), token usage
 — do NOT switch to Pinecone or Weaviate
 - **LLM:** `gemini-1.5-pro` for generation and judging
 - **Reranker:** `gemini-1.5-flash` (cheaper, fast enough for reranking)
-- **Image region detection:** `gemini-3.1-flash-lite-preview` (cost-efficient multimodal, used in `chunk_image`)
+- **Image region detection:** `gemini-3-flash-preview` (better spatial reasoning than lite; runs once at ingestion, not query time)
 - **Retrieval:** Hybrid BM25 + vector with RRF fusion
 — do NOT use vector-only retrieval
 - **Chunking:** 512 tokens, 64 overlap, via PyMuPDF
