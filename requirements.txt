@@ -8,3 +8,5 @@ python-dotenv
 rank-bm25
 pillow
 loguru
+tiktoken
+reportlab

@@ -90,6 +90,8 @@ MAX_FILE_SIZE_MB: int = _optional_int("MAX_FILE_SIZE_MB", 200)
 
 CHUNK_SIZE: int = _optional_int("CHUNK_SIZE", 512)
 CHUNK_OVERLAP: int = _optional_int("CHUNK_OVERLAP", 64)
+PDF_CHUNK_SIZE: int = _optional_int("PDF_CHUNK_SIZE", 800)
+PDF_CHUNK_OVERLAP: int = _optional_int("PDF_CHUNK_OVERLAP", 100)
 TMP_UPLOAD_DIR: str = _optional("TMP_UPLOAD_DIR", "./tmp")
 TMP_UPLOADS_DIR: str = str(Path(_optional("TMP_UPLOAD_DIR", "./tmp")) / "uploads")
 
