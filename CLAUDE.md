@@ -198,7 +198,7 @@ Update this section as you complete each step:
 ## Common Mistakes to Avoid
 
 - Do not store embeddings in ChromaDB AND a separate file — ChromaDB is the single source of truth
-- Do not call the Gemini embedding API one chunk at a time — always batch in groups of 100
+- Do not call the Gemini embedding API one chunk at a time — batch documents in groups of 20 (20k token/request limit; max 250 inputs/request — see https://docs.cloud.google.com/vertex-ai/generative-ai/docs/embeddings/get-text-embeddings)
 - Do not re-embed a file that's already indexed — check SHA-256 hash first
 - Do not send all 20 retrieved chunks to the LLM — rerank to 5 first
 - Do not build the BM25 index in the query path — build it during ingestion, load it at startup

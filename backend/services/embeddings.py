@@ -6,7 +6,9 @@ Key rules:
 - embed_text: single string, used only for query embedding at search time
 - embed_chunks: handles image, video, audio, and document chunks
   - Images: batched up to 6 per request (hard API limit)
-  - Documents: batched up to 100 per request (hard API limit, empirically verified)
+  - Documents: batched up to 250 per request (hard API limit), but the 20,000-token
+    per-request cap is the binding constraint — default batch size is 20 (~800 tokens
+    × 20 = 16,000 tokens, safely under the limit)
   - Video / audio: 1 per request, all concurrent
 - Transient errors (429, 5xx, unknown) are retried with exponential backoff
 - Permanent errors (4xx except 429) fail immediately — no wasted retries
@@ -26,7 +28,8 @@ import backend.config as config
 _client = genai.Client(api_key=config.GEMINI_API_KEY)
 
 _IMAGE_BATCH_SIZE = config.EMBEDDING_IMAGE_BATCH_SIZE      # 6 — hard API limit
-_DOCUMENT_BATCH_SIZE = config.EMBEDDING_DOCUMENT_BATCH_SIZE  # 100 — hard API limit (tested)
+_DOCUMENT_BATCH_SIZE = config.EMBEDDING_DOCUMENT_BATCH_SIZE  # default 20 — bound by 20k token/request limit; max 250 inputs/request
+# https://docs.cloud.google.com/vertex-ai/generative-ai/docs/embeddings/get-text-embeddings
 _MAX_RETRIES = config.EMBEDDING_MAX_RETRIES
 _MAX_WORKERS = config.EMBEDDING_MAX_WORKERS
 
@@ -123,7 +126,7 @@ def embed_chunks(chunks: list[dict]) -> list[dict]:
             future = executor.submit(_embed_media_batch, batch)
             futures[future] = ("image", batch)
 
-        # Documents — up to 100 per call (hard API limit, tested)
+        # Documents — batched per 20k-token limit (default 20 chunks); max 250 inputs/request
         for batch_start in range(0, len(document_items), _DOCUMENT_BATCH_SIZE):
             batch = document_items[batch_start : batch_start + _DOCUMENT_BATCH_SIZE]
             future = executor.submit(_embed_media_batch, batch)
