@@ -5,6 +5,7 @@ a receipt. Full ingestion pipeline (chunking → embedding → indexing)
 is wired in here once the service layer is implemented.
 """
 
+import hashlib
 import uuid
 from pathlib import Path
 
@@ -54,7 +55,18 @@ async def upload_file(file: UploadFile = File(...)) -> UploadResponse:
             ),
         )
 
-    # ---- 3. Save to ./tmp/uploads/{uuid}_{original_filename} ----
+    # ---- 3. Dedup check — skip ingestion if file content already indexed ----
+    file_hash = hashlib.sha256(contents).hexdigest()
+    if vectorstore.is_file_indexed(file_hash):
+        logger.info(f"File {file.filename!r} already indexed (hash {file_hash[:8]}…) — skipping.")
+        return UploadResponse(
+            file_id=file_hash[:8],
+            filename=file.filename,
+            size_bytes=size_bytes,
+            status="already_indexed",
+        )
+
+    # ---- 4. Save to ./tmp/uploads/{uuid}_{original_filename} ----
     uploads_dir = Path(config.TMP_UPLOADS_DIR)
     uploads_dir.mkdir(parents=True, exist_ok=True)
 
@@ -63,8 +75,6 @@ async def upload_file(file: UploadFile = File(...)) -> UploadResponse:
     dest.write_bytes(contents)
     logger.info(f"Saved {size_bytes} bytes → {dest}")
 
-    # TODO (Week 1): compute SHA-256; skip ingestion if already indexed
-
     try:
         if suffix == ".pdf":
             chunks = chunking.chunk_pdf(str(dest))
@@ -72,6 +82,12 @@ async def upload_file(file: UploadFile = File(...)) -> UploadResponse:
             chunks = chunking.chunk_image(str(dest))
         else:  # .mp4, .mov
             chunks = chunking.chunk_video(str(dest))
+
+        # Stamp original filename and content hash onto every chunk so
+        # vectorstore IDs are content-derived, not path-derived.
+        for chunk in chunks:
+            chunk["source"] = file.filename
+            chunk["file_hash"] = file_hash
 
         chunks = embeddings.embed_chunks(chunks)
         vectorstore.add_chunks(chunks)

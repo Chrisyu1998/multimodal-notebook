@@ -22,24 +22,30 @@ _collection = _client.get_or_create_collection(
 )
 
 
-def _chunk_id(source: str, chunk_index: int) -> str:
-    """Return a stable SHA-256 deduplication ID for a chunk."""
-    raw = f"{source}:{chunk_index}".encode()
+def _chunk_id(file_hash: str, chunk_index: int) -> str:
+    """Return a stable deduplication ID derived from file content hash + position."""
+    raw = f"{file_hash}:{chunk_index}".encode()
     return hashlib.sha256(raw).hexdigest()
+
+
+def is_file_indexed(file_hash: str) -> bool:
+    """Return True if any chunk from this file (by SHA-256) is already in the collection."""
+    results = _collection.get(where={"file_hash": file_hash}, limit=1, include=[])
+    return len(results["ids"]) > 0
 
 
 def add_chunks(chunks: list[dict]) -> None:
     """
     Upsert a list of embedded chunk dicts into ChromaDB.
 
-    Each chunk must have: text, source, page, chunk_index, embedding.
+    Each chunk must have: text, source, file_hash, page, chunk_index, embedding.
     Chunks whose deduplication ID already exists are silently skipped.
     """
     if not chunks:
         logger.info("add_chunks called with empty list — nothing to do.")
         return
 
-    ids = [_chunk_id(c["source"], c["chunk_index"]) for c in chunks]
+    ids = [_chunk_id(c["file_hash"], c["chunk_index"]) for c in chunks]
 
     # Determine which IDs are new
     existing = set(_collection.get(ids=ids, include=[])["ids"])
@@ -56,7 +62,12 @@ def add_chunks(chunks: list[dict]) -> None:
         embeddings=[c["embedding"] for c in new_chunks],
         documents=[c["text"] for c in new_chunks],
         metadatas=[
-            {"source": c["source"], "page": c["page"], "chunk_index": c["chunk_index"]}
+            {
+                "source": c["source"],
+                "file_hash": c["file_hash"],
+                "page": c["page"],
+                "chunk_index": c["chunk_index"],
+            }
             for c in new_chunks
         ],
     )

@@ -18,6 +18,7 @@ import backend.services.vectorstore as vs
 # ---------------------------------------------------------------------------
 
 FAKE_DIM = 768
+FAKE_HASH = "a" * 64  # placeholder SHA-256 hex string
 
 
 def unit_vector() -> list[float]:
@@ -33,13 +34,27 @@ def orthogonal_vector() -> list[float]:
     return [val] * half + [-val] * half
 
 
-def make_chunk(text: str, source: str, page: int, chunk_index: int, embedding: list[float]) -> dict:
-    return {"text": text, "source": source, "page": page, "chunk_index": chunk_index, "embedding": embedding}
+def make_chunk(
+    text: str,
+    source: str,
+    page: int,
+    chunk_index: int,
+    embedding: list[float],
+    file_hash: str = FAKE_HASH,
+) -> dict:
+    return {
+        "text": text,
+        "source": source,
+        "file_hash": file_hash,
+        "page": page,
+        "chunk_index": chunk_index,
+        "embedding": embedding,
+    }
 
 
-def chunk_id(source: str, chunk_index: int) -> str:
+def chunk_id(file_hash: str, chunk_index: int) -> str:
     """Mirror of the private _chunk_id used in vectorstore.py."""
-    return hashlib.sha256(f"{source}:{chunk_index}".encode()).hexdigest()
+    return hashlib.sha256(f"{file_hash}:{chunk_index}".encode()).hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -75,10 +90,10 @@ def test_add_chunks_inserts_new_chunks(store):
 
 
 def test_add_chunks_uses_correct_ids(store):
-    chunks = [make_chunk("Some text.", "doc.pdf", 1, 0, unit_vector())]
+    chunks = [make_chunk("Some text.", "doc.pdf", 1, 0, unit_vector(), file_hash=FAKE_HASH)]
     vs.add_chunks(chunks)
 
-    expected_id = chunk_id("doc.pdf", 0)
+    expected_id = chunk_id(FAKE_HASH, 0)
     result = store.get(ids=[expected_id], include=[])
     assert result["ids"] == [expected_id]
 
@@ -108,12 +123,13 @@ def test_add_chunks_empty_list_is_noop(store):
 
 
 def test_add_chunks_stores_correct_metadata(store):
-    chunk = make_chunk("Some text.", "report.pdf", 3, 7, unit_vector())
+    chunk = make_chunk("Some text.", "report.pdf", 3, 7, unit_vector(), file_hash=FAKE_HASH)
     vs.add_chunks([chunk])
 
     result = store.get(include=["metadatas"])
     meta = result["metadatas"][0]
     assert meta["source"] == "report.pdf"
+    assert meta["file_hash"] == FAKE_HASH
     assert meta["page"] == 3
     assert meta["chunk_index"] == 7
 
@@ -124,6 +140,54 @@ def test_add_chunks_stores_correct_document(store):
 
     result = store.get(include=["documents"])
     assert result["documents"][0] == "Exact text content."
+
+
+# ---------------------------------------------------------------------------
+# is_file_indexed tests
+# ---------------------------------------------------------------------------
+
+def test_is_file_indexed_returns_false_for_unknown_hash(store):
+    assert vs.is_file_indexed("nonexistent" * 4) is False
+
+
+def test_is_file_indexed_returns_true_after_add(store):
+    file_hash = "b" * 64
+    chunk = make_chunk("Some text.", "doc.pdf", 1, 0, unit_vector(), file_hash=file_hash)
+    vs.add_chunks([chunk])
+    assert vs.is_file_indexed(file_hash) is True
+
+
+def test_is_file_indexed_only_matches_own_hash(store):
+    hash_a = "a" * 64
+    hash_b = "b" * 64
+    chunk = make_chunk("Text.", "doc.pdf", 1, 0, unit_vector(), file_hash=hash_a)
+    vs.add_chunks([chunk])
+
+    assert vs.is_file_indexed(hash_a) is True
+    assert vs.is_file_indexed(hash_b) is False
+
+
+def test_is_file_indexed_matches_any_chunk_from_file(store):
+    """If a file has multiple chunks, any one of them triggers is_file_indexed."""
+    file_hash = "c" * 64
+    chunks = [
+        make_chunk("Chunk 0.", "doc.pdf", 1, 0, unit_vector(), file_hash=file_hash),
+        make_chunk("Chunk 1.", "doc.pdf", 1, 1, unit_vector(), file_hash=file_hash),
+    ]
+    vs.add_chunks(chunks)
+    assert vs.is_file_indexed(file_hash) is True
+
+
+def test_chunk_ids_are_content_derived_not_path_derived(store):
+    """Same file_hash + chunk_index → same ID regardless of source path."""
+    file_hash = "d" * 64
+    chunk_v1 = make_chunk("Text.", "/tmp/uuid1_doc.pdf", 1, 0, unit_vector(), file_hash=file_hash)
+    chunk_v2 = make_chunk("Text.", "/tmp/uuid2_doc.pdf", 1, 0, unit_vector(), file_hash=file_hash)
+
+    vs.add_chunks([chunk_v1])
+    # chunk_v2 has the same file_hash and chunk_index → same ID → should be skipped
+    vs.add_chunks([chunk_v2])
+    assert store.count() == 1
 
 
 # ---------------------------------------------------------------------------
@@ -148,7 +212,7 @@ def test_search_score_is_near_one_for_identical_vector(store):
 
 
 def test_search_score_is_near_zero_for_orthogonal_vector(store):
-    """Searching with an orthogonal vector should return score ≈ 0.5 (cosine sim = 0)."""
+    """Searching with an orthogonal vector should return score ≈ 0.0."""
     vs.add_chunks([make_chunk("Unrelated chunk.", "doc.pdf", 1, 0, unit_vector())])
     results = vs.search(orthogonal_vector(), top_k=1)
 
