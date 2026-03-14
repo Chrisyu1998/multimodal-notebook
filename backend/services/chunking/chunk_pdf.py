@@ -1,20 +1,13 @@
 """
-Chunking service — converts raw files into chunk dicts.
+PDF chunking — converts a PDF file into chunk dicts.
 
-Each chunk dict shape varies by modality:
-- PDF:   type="document", pdf_bytes, text, source, page, chunk_index,
-         modality="pdf", section_heading, document_title
-- Image: type="image",    image_bytes, text, source, chunk_index,
-         modality="image"
-- Video: type="video",    video_bytes, text, source, chunk_index,
-         modality="video"
+Uses PyMuPDF (fitz) for parsing, tiktoken for token counting, and
+reportlab to render each text chunk back to a single-page PDF for
+Gemini Embedding 2.
 
-Rules:
-- PDF: PyMuPDF (fitz), tiktoken cl100k_base, 800-token target chunks,
-  100-token overlap at mid-section splits, no overlap at TOC boundaries.
-  Each chunk is rendered to a single-page PDF via reportlab for Gemini Embedding 2.
-- Image: passed whole; Gemini Embedding 2 handles natively.
-- Video: 128-second segments passed as video/mp4 to Gemini Embedding 2.
+Chunk shape:
+    type="document", pdf_bytes, text, source, page, chunk_index,
+    modality="pdf", section_heading, document_title
 """
 
 import io
@@ -227,28 +220,3 @@ def chunk_pdf(filepath: str) -> list[dict]:
         f"chunk_pdf: produced {len(chunks)} chunks from {Path(filepath).name}"
     )
     return chunks
-
-
-def chunk_image(filepath: str) -> list[dict]:
-    """
-    Wrap a single image file as one chunk dict.
-    The raw image bytes are stored so embed_chunks can pass them
-    directly to the Gemini multimodal embedding API.
-    """
-    logger.debug(f"chunk_image called: {filepath}")
-    # TODO: read image bytes with Pillow to validate it's a real image
-    # TODO: compute sha256 of file bytes for chunk_id
-    # TODO: return single-element list with type="image"
-    raise NotImplementedError
-
-
-def chunk_video(filepath: str) -> list[dict]:
-    """
-    Split a video into 128-second segments.
-    Each segment is returned as a chunk with raw video bytes for
-    Gemini Embedding 2 (video/mp4, one per API request).
-    """
-    logger.debug(f"chunk_video called: {filepath}")
-    # TODO: split video into 128s segments via ffmpeg or moviepy
-    # TODO: return list of chunk dicts with type="video"
-    raise NotImplementedError

@@ -82,7 +82,7 @@ PORT: int = _optional_int("PORT", 8000)
 # Upload validation
 # ============================================================
 
-ALLOWED_FILE_TYPES: set[str] = {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".mp4", ".mov"}
+ALLOWED_FILE_TYPES: set[str] = {".pdf", ".png", ".jpeg", ".mp4", ".mov"}
 MAX_FILE_SIZE_MB: int = _optional_int("MAX_FILE_SIZE_MB", 200)
 
 # ============================================================

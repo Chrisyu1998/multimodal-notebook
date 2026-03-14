@@ -15,7 +15,7 @@ import pytest
 os.environ.setdefault("GEMINI_API_KEY", "test-key")
 os.environ.setdefault("GCS_BUCKET_NAME", "test-bucket")
 
-from backend.services.chunking import chunk_pdf
+from backend.services.chunking.chunk_pdf import chunk_pdf
 import backend.config as config
 
 # ---------------------------------------------------------------------------
