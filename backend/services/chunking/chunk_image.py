@@ -56,16 +56,22 @@ def chunk_image(filepath: str) -> list[dict]:
     path = Path(filepath)
     filename = path.name
 
-    # ── Validate format and read raw bytes ───────────────────────────────────
+    # ── Load image, normalise to PNG/JPEG if needed ──────────────────────────
     image = Image.open(filepath)
     fmt = image.format  # set by Pillow after open
     if fmt not in {"PNG", "JPEG"}:
-        raise ValueError(
-            f"chunk_image: unsupported format '{fmt}' for {filename}. "
-            "Only PNG and JPEG are supported."
+        logger.info(
+            f"chunk_image: converting {fmt} → PNG for {filename}"
         )
+        buf = io.BytesIO()
+        image.convert("RGBA").save(buf, format="PNG")
+        raw_bytes = buf.getvalue()
+        fmt = "PNG"
+        # Re-open from the normalised bytes so crop operations use the same object
+        image = Image.open(io.BytesIO(raw_bytes))
+    else:
+        raw_bytes = path.read_bytes()
 
-    raw_bytes = path.read_bytes()
     global_image_id = hashlib.sha256(raw_bytes).hexdigest()
     mime_type = "image/png" if fmt == "PNG" else "image/jpeg"
     img_width, img_height = image.size
@@ -91,10 +97,13 @@ def chunk_image(filepath: str) -> list[dict]:
     try:
         image_part = genai_types.Part.from_bytes(data=raw_bytes, mime_type=mime_type)
         response = _gemini_client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-3.1-flash-lite-preview",
             contents=[image_part, _REGION_PROMPT],
         )
-        response_text = response.text.strip()
+        response_text = "".join(
+            part.text for part in response.candidates[0].content.parts
+            if hasattr(part, "text") and part.text
+        ).strip()
 
         # Strip markdown code fences if present
         response_text = re.sub(r"^```(?:json)?\s*", "", response_text)
