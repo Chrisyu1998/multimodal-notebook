@@ -1,25 +1,19 @@
 """
 PDF chunking — converts a PDF file into chunk dicts.
 
-Uses PyMuPDF (fitz) for parsing, tiktoken for token counting, and
-reportlab to render each text chunk back to a single-page PDF for
-Gemini Embedding 2.
+Uses PyMuPDF (fitz) for parsing and tiktoken for token counting.
 
 Chunk shape:
-    type="document", pdf_bytes, text, source, page, chunk_index,
+    type="document", text, source, page, chunk_index,
     modality="pdf", section_heading, document_title
 """
 
-import io
 from pathlib import Path
 from typing import Optional
 
 import fitz
 import tiktoken
 from loguru import logger
-from reportlab.lib.pagesizes import letter
-from reportlab.lib.utils import simpleSplit
-from reportlab.pdfgen import canvas
 
 import backend.config as config
 
@@ -27,28 +21,6 @@ _enc = tiktoken.get_encoding("cl100k_base")
 _PDF_CHUNK_SIZE: int = config.PDF_CHUNK_SIZE
 _PDF_CHUNK_OVERLAP: int = config.PDF_CHUNK_OVERLAP
 
-
-def _make_pdf_bytes(text: str) -> bytes:
-    """Render plain text into a minimal single-page PDF using reportlab."""
-    buf = io.BytesIO()
-    c = canvas.Canvas(buf, pagesize=letter)
-    width, height = letter
-    margin = 72.0
-    max_width = width - 2 * margin
-    y = height - margin
-    line_height = 14.0
-    c.setFont("Helvetica", 10)
-    for line in text.split("\n"):
-        wrapped = simpleSplit(line, "Helvetica", 10, max_width) or [""]
-        for wl in wrapped:
-            if y < margin:
-                c.showPage()
-                c.setFont("Helvetica", 10)
-                y = height - margin
-            c.drawString(margin, y, wl)
-            y -= line_height
-    c.save()
-    return buf.getvalue()
 
 
 def _get_overlap_paras(
@@ -74,8 +46,7 @@ def chunk_pdf(filepath: str) -> list[dict]:
     Step 1 — Parse: extract title, TOC, and per-page text via PyMuPDF.
     Step 2 — Chunk: sliding window over paragraphs; reset at TOC boundaries,
       100-token overlap at mid-section splits, hard ceiling of 800 tokens.
-    Step 3 — Embed input: prepend title + section heading, render to PDF bytes.
-    Step 4 — Return chunk dicts with all required keys.
+    Step 3 — Return chunk dicts with all required keys.
     """
     doc = fitz.open(filepath)
     title: str = (doc.metadata.get("title") or "").strip() or Path(filepath).stem
@@ -153,18 +124,9 @@ def chunk_pdf(filepath: str) -> list[dict]:
 
         page_num = paras[0][0]
         section_heading = paras[0][2]
-        chunk_to_embed = f"Doc: {title} | Section: {section_heading}\n\n{chunk_text}"
-        try:
-            pdf_bytes = _make_pdf_bytes(chunk_to_embed)
-        except Exception as exc:
-            logger.warning(
-                f"chunk_pdf: skipping chunk {chunk_index} — PDF render failed: {exc}"
-            )
-            return
         chunks.append(
             {
                 "type": "document",
-                "pdf_bytes": pdf_bytes,
                 "text": chunk_text,
                 "source": filepath,
                 "page": page_num,

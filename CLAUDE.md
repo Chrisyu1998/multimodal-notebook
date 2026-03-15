@@ -26,7 +26,7 @@ frameworks, and cost-aware architecture decisions.
 ### Ingestion Pipeline
 
 1. User uploads file → saved to GCS
-2. PDF → split into 6-page chunks → each chunk embedded directly as PDF
+2. PDF → split into 800-token chunks (100-token overlap, TOC-aware) → text embedded via Gemini Embedding 2
 3. Images → passed whole to Gemini Embedding 2 (no change)
 4. Video → split into 128s segments → each segment embedded directly as video/mp4
 5. Audio → passed directly to Gemini Embedding 2 (max 80s per file)
@@ -104,7 +104,7 @@ context precision, latency (p50/p95), token usage
 - **Image region detection:** `gemini-3-flash-preview` (better spatial reasoning than lite; runs once at ingestion, not query time)
 - **Retrieval:** Hybrid BM25 + vector with RRF fusion
 — do NOT use vector-only retrieval
-- **Chunking:** 512 tokens, 64 overlap, via PyMuPDF
+- **Chunking:** 800 tokens, 100 overlap, via PyMuPDF
 — do NOT use LangChain's text splitter
 - **PDF parsing:** PyMuPDF (fitz) — do NOT use pdfplumber or pypdf
 - **Orchestration:** Build retrieval pipeline manually

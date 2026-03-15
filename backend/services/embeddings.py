@@ -36,19 +36,17 @@ _MAX_WORKERS = config.EMBEDDING_MAX_WORKERS
 # Types that must be sent one per API request
 _SINGLE_FILE_TYPES = {"video", "audio"}
 
-# Maps chunk type → bytes field name
+# Maps chunk type → bytes field name (document chunks embed text, not bytes)
 _MEDIA_BYTES_FIELD: dict[str, str] = {
-    "image":    "image_bytes",
-    "video":    "video_bytes",
-    "audio":    "audio_bytes",
-    "document": "pdf_bytes",
+    "image": "image_bytes",
+    "video": "video_bytes",
+    "audio": "audio_bytes",
 }
 
 # Fixed MIME types for non-image media
 _MEDIA_MIME: dict[str, str] = {
-    "video":    "video/mp4",
-    "audio":    "audio/mp3",
-    "document": "application/pdf",
+    "video": "video/mp4",
+    "audio": "audio/mp3",
 }
 
 _RETRYABLE_STATUS_CODES = config.EMBEDDING_RETRYABLE_STATUS_CODES
@@ -198,6 +196,21 @@ def _embed_media_batch(items: list[tuple[int, dict]]) -> list[list[float]]:
     return _with_retry(_call, chunk_type=chunk_type, indices=indices)
 
 
+def _doc_embed_text(chunk: dict) -> str:
+    """Return the string to embed for a document chunk.
+
+    Prepends 'Doc: <title> | Section: <heading>' when those fields are present
+    so the embedding captures document context without polluting chunk['text'],
+    which is kept as clean raw text for generation and display.
+    """
+    title = chunk.get("document_title", "")
+    section = chunk.get("section_heading", "")
+    text = chunk.get("text", "")
+    if title or section:
+        return f"Doc: {title} | Section: {section}\n\n{text}"
+    return text
+
+
 def _embed_text_batch(items: list[tuple[int, dict]]) -> list[list[float]]:
     """Embed a batch of text-based chunks (PDF documents) using the text field.
 
@@ -209,7 +222,7 @@ def _embed_text_batch(items: list[tuple[int, dict]]) -> list[list[float]]:
         return []
 
     indices = [i for i, _ in items]
-    texts = [chunk.get("text", "") for _, chunk in items]
+    texts = [_doc_embed_text(chunk) for _, chunk in items]
 
     def _call() -> list[list[float]]:
         result = _client.models.embed_content(
