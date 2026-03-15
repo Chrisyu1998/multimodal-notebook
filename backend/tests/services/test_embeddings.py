@@ -386,8 +386,10 @@ class TestEmbedChunksDocument:
             result = emb.embed_chunks([chunk])
         assert "embedding" in result[0]
 
-    def test_correct_mime_type_sent(self):
-        chunk = make_media_chunk("document", 0)
+    def test_correct_content_type_sent(self):
+        # Documents are embedded as text strings (not PDF bytes) for exact
+        # text-to-text alignment with query embeddings.
+        chunk = {"type": "document", "text": "hello world", "source": "file_0", "chunk_index": 0}
         received = []
 
         def capture(model, contents):  # noqa: ARG001
@@ -397,7 +399,8 @@ class TestEmbedChunksDocument:
         with patch.object(emb._client.models, "embed_content", side_effect=capture):
             emb.embed_chunks([chunk])
 
-        assert received[0][0].inline_data.mime_type == "application/pdf"
+        assert isinstance(received[0], list)
+        assert isinstance(received[0][0], str)
 
     def test_batched_in_single_call(self):
         """3 document chunks must be sent in one API call, not three."""
@@ -413,9 +416,10 @@ class TestEmbedChunksDocument:
 
         assert call_sizes == [3]
 
-    def test_batch_splits_at_100(self):
-        """101 document chunks must produce exactly 2 API calls (100 + 1)."""
-        chunks = [make_media_chunk("document", i) for i in range(101)]
+    def test_batch_splits_at_document_batch_size(self):
+        """batch_size+1 document chunks must produce exactly 2 API calls."""
+        n = emb._DOCUMENT_BATCH_SIZE + 1
+        chunks = [make_media_chunk("document", i) for i in range(n)]
         call_sizes: list[int] = []
 
         def capture(model, contents):  # noqa: ARG001
@@ -425,7 +429,7 @@ class TestEmbedChunksDocument:
         with patch.object(emb._client.models, "embed_content", side_effect=capture):
             emb.embed_chunks(chunks)
 
-        assert sorted(call_sizes) == [1, 100]
+        assert sorted(call_sizes) == [1, emb._DOCUMENT_BATCH_SIZE]
 
 
 # ---------------------------------------------------------------------------

@@ -17,25 +17,53 @@ import time
 from fastapi import APIRouter, HTTPException
 from loguru import logger
 
-from backend.models.schemas import QueryRequest, QueryResponse
-
-# TODO: import services once implemented
-# from backend.services import retrieval, generation
+import backend.config as config
+from backend.models.schemas import QueryRequest, QueryResponse, SourceReference
+from backend.services import embeddings, vectorstore, generation
 
 router = APIRouter()
 
 
 @router.post("/", response_model=QueryResponse)
 async def query(request: QueryRequest) -> QueryResponse:
-    """Run the full RAG pipeline for a user question and return an answer."""
+    """Embed question → vector search → generate grounded answer with Gemini."""
     logger.info(f"Query received: {request.question!r}")
     start = time.monotonic()
 
-    # TODO: retrieval.hybrid_search(request.question)  → chunks
-    # TODO: retrieval.rerank(request.question, chunks)  → top 5
-    # TODO: generation.generate_answer(request.question, top_chunks)
+    try:
+        query_embedding = embeddings.embed_text(request.question)
+    except Exception as exc:
+        logger.error(f"Embedding failed: {exc}")
+        raise HTTPException(status_code=502, detail="Failed to embed question") from exc
+
+    try:
+        chunks = vectorstore.search(query_embedding, top_k=5)
+    except Exception as exc:
+        logger.error(f"Vector search failed: {exc}")
+        raise HTTPException(status_code=502, detail="Vector search failed") from exc
+
+    if not chunks:
+        elapsed_ms = (time.monotonic() - start) * 1000
+        logger.warning(f"No chunks found for query in {elapsed_ms:.1f}ms")
+        return QueryResponse(
+            answer="I don't have enough information to answer this.",
+            sources=[],
+            chunks_used=0,
+            model=config.GENERATION_MODEL,
+        )
+
+    try:
+        result = generation.generate_answer(request.question, chunks)
+    except Exception as exc:
+        logger.error(f"Generation failed: {exc}")
+        raise HTTPException(status_code=502, detail="Answer generation failed") from exc
 
     elapsed_ms = (time.monotonic() - start) * 1000
-    logger.info(f"Query completed in {elapsed_ms:.1f}ms")
+    logger.info(f"Query completed in {elapsed_ms:.1f}ms — {result['chunks_used']} chunks used")
 
-    raise HTTPException(status_code=501, detail="Not implemented yet")
+    return QueryResponse(
+        answer=result["answer"],
+        sources=[SourceReference(**s) for s in result["sources"]],
+        chunks_used=result["chunks_used"],
+        model=result["model"],
+    )

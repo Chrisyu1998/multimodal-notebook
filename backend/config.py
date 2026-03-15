@@ -54,8 +54,8 @@ EMBEDDING_DOCUMENT_BATCH_SIZE: int = _optional_int("EMBEDDING_DOCUMENT_BATCH_SIZ
 EMBEDDING_MAX_RETRIES: int = _optional_int("EMBEDDING_MAX_RETRIES", 3)
 EMBEDDING_MAX_WORKERS: int = _optional_int("EMBEDDING_MAX_WORKERS", 8)
 EMBEDDING_RETRYABLE_STATUS_CODES: frozenset[int] = frozenset({429, 500, 502, 503, 504})
-GENERATION_MODEL: str = "gemini-1.5-pro"        # immutable — see CLAUDE.md
-RERANK_MODEL: str = "gemini-1.5-flash"          # immutable — see CLAUDE.md
+GENERATION_MODEL: str = "gemini-2.5-flash"       # immutable — see CLAUDE.md
+RERANK_MODEL: str = "gemini-2.5-flash"          # immutable — see CLAUDE.md
 
 # ============================================================
 # Google Cloud Storage
@@ -127,4 +127,4 @@ EVAL_DB_PATH: str = _optional(
 EVAL_DATASET_PATH: str = _optional(
     "EVAL_DATASET_PATH", "./backend/eval/golden_dataset.json"
 )
-EVAL_JUDGE_MODEL: str = _optional("EVAL_JUDGE_MODEL", "gemini-1.5-pro")
+EVAL_JUDGE_MODEL: str = _optional("EVAL_JUDGE_MODEL", "gemini-2.5-flash")

@@ -6,7 +6,7 @@ A production-grade Retrieval-Augmented Generation (RAG) system.
 Users upload documents, images, and videos. They can then ask
 natural language questions about them. The system retrieves
 relevant content using hybrid search, reranks results, and
-generates grounded answers using Gemini 1.5 Pro.
+generates grounded answers using Gemini 2.5 Flash.
 
 A second tab in the UI shows an Eval Dashboard that runs a
 golden dataset of 50 test queries and tracks quality metrics
@@ -41,12 +41,12 @@ frameworks, and cost-aware architecture decisions.
 4. Reciprocal Rank Fusion (RRF) → merge into single ranked list
 5. Reranker (Gemini Flash) → score top 20 → keep top 5
 6. Dynamic context window check → summarize if >80% full
-7. Gemini 1.5 Pro generates answer with Chain-of-Thought prompt
+7. Gemini 2.5 Flash generates answer with Chain-of-Thought prompt
 
 ### Eval Dashboard
 
 - Golden dataset: 50 hard queries with ground truth answers
-- LLM-as-judge: Gemini 1.5 Pro scores each response 0-5
+- LLM-as-judge: Gemini 2.5 Flash scores each response 0-5
 - Metrics tracked: correctness, hallucination rate, faithfulness,
 context precision, latency (p50/p95), token usage
 - Results stored in SQLite, visualized in React with Recharts
@@ -99,8 +99,8 @@ context precision, latency (p50/p95), token usage
 — chosen because it supports text, image, and video natively
 - **Vector DB:** ChromaDB with cosine similarity (local persistence)
 — do NOT switch to Pinecone or Weaviate
-- **LLM:** `gemini-1.5-pro` for generation and judging
-- **Reranker:** `gemini-1.5-flash` (cheaper, fast enough for reranking)
+- **LLM:** `gemini-2.5-flash` for generation and judging — lower hallucination rate (~3.3%), better faithfulness to context, 20× cheaper than 1.5 Pro
+- **Reranker:** `gemini-2.5-flash` (same model, fast and cost-efficient for reranking)
 - **Image region detection:** `gemini-3-flash-preview` (better spatial reasoning than lite; runs once at ingestion, not query time)
 - **Retrieval:** Hybrid BM25 + vector with RRF fusion
 — do NOT use vector-only retrieval

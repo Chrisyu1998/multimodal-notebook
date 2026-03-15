@@ -103,15 +103,18 @@ def embed_chunks(chunks: list[dict]) -> list[dict]:
     logger.info(f"Embedding {len(chunks)} chunks with {config.EMBEDDING_MODEL}…")
 
     image_items: list[tuple[int, dict]] = []
-    document_items: list[tuple[int, dict]] = []
     single_items: list[tuple[int, dict]] = []
+    text_items: list[tuple[int, dict]] = []
 
     for i, chunk in enumerate(chunks):
         chunk_type = chunk.get("type")
         if chunk_type == "image":
             image_items.append((i, chunk))
         elif chunk_type == "document":
-            document_items.append((i, chunk))
+            # Embed text directly. Synthetic PDFs (reportlab re-renders) and
+            # video summary PDFs land in a different embedding subspace from
+            # text queries — text→text alignment is exact.
+            text_items.append((i, chunk))
         elif chunk_type in _SINGLE_FILE_TYPES:
             single_items.append((i, chunk))
         else:
@@ -126,10 +129,10 @@ def embed_chunks(chunks: list[dict]) -> list[dict]:
             future = executor.submit(_embed_media_batch, batch)
             futures[future] = ("image", batch)
 
-        # Documents — batched per 20k-token limit (default 20 chunks); max 250 inputs/request
-        for batch_start in range(0, len(document_items), _DOCUMENT_BATCH_SIZE):
-            batch = document_items[batch_start : batch_start + _DOCUMENT_BATCH_SIZE]
-            future = executor.submit(_embed_media_batch, batch)
+        # PDF text chunks — embed text field directly (batch up to 250 strings per call)
+        for batch_start in range(0, len(text_items), _DOCUMENT_BATCH_SIZE):
+            batch = text_items[batch_start : batch_start + _DOCUMENT_BATCH_SIZE]
+            future = executor.submit(_embed_text_batch, batch)
             futures[future] = ("document", batch)
 
         # Video / audio — exactly 1 per call, all concurrent
@@ -193,6 +196,29 @@ def _embed_media_batch(items: list[tuple[int, dict]]) -> list[list[float]]:
         return [e.values for e in result.embeddings]
 
     return _with_retry(_call, chunk_type=chunk_type, indices=indices)
+
+
+def _embed_text_batch(items: list[tuple[int, dict]]) -> list[list[float]]:
+    """Embed a batch of text-based chunks (PDF documents) using the text field.
+
+    Sends all texts as a list of strings in a single API call.
+    Stays within the 250-input / 20k-token-per-request limits when callers
+    use _DOCUMENT_BATCH_SIZE (default 20).
+    """
+    if not items:
+        return []
+
+    indices = [i for i, _ in items]
+    texts = [chunk.get("text", "") for _, chunk in items]
+
+    def _call() -> list[list[float]]:
+        result = _client.models.embed_content(
+            model=config.EMBEDDING_MODEL,
+            contents=texts,
+        )
+        return [e.values for e in result.embeddings]
+
+    return _with_retry(_call, chunk_type="document", indices=indices)
 
 
 def _image_mime(data: bytes) -> str:

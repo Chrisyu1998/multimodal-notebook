@@ -35,19 +35,19 @@ class QueryRequest(BaseModel):
     question: str
 
 
-class ChunkReference(BaseModel):
-    """A single retrieved chunk surfaced alongside the answer."""
-    chunk_id: str
-    text: str
-    source: str
+class SourceReference(BaseModel):
+    """A single source chunk surfaced alongside the answer."""
+    filename: str
+    page: int
     score: float
 
 
 class QueryResponse(BaseModel):
     """Returned after the RAG pipeline generates an answer."""
     answer: str
-    chunks_used: list[ChunkReference]
-    latency_ms: float
+    sources: list[SourceReference]
+    chunks_used: int
+    model: str
 
 
 # ---------------------------------------------------------------------------
