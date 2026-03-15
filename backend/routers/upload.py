@@ -80,6 +80,8 @@ async def upload_file(file: UploadFile = File(...)) -> UploadResponse:
             chunks = chunking.chunk_pdf(str(dest))
         elif suffix in {".png", ".jpeg"}:
             chunks = chunking.chunk_image(str(dest))
+        elif suffix in {".mp3", ".wav", ".m4a"}:
+            chunks = chunking.chunk_audio(str(dest))
         else:  # .mp4, .mov
             chunks = chunking.chunk_video(str(dest))
 

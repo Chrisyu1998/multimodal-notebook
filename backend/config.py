@@ -82,7 +82,7 @@ PORT: int = _optional_int("PORT", 8000)
 # Upload validation
 # ============================================================
 
-ALLOWED_FILE_TYPES: set[str] = {".pdf", ".png", ".jpeg", ".mp4", ".mov"}
+ALLOWED_FILE_TYPES: set[str] = {".pdf", ".png", ".jpeg", ".mp4", ".mov", ".mp3", ".wav", ".m4a"}
 MAX_FILE_SIZE_MB: int = _optional_int("MAX_FILE_SIZE_MB", 500)
 
 # ============================================================
@@ -96,6 +96,13 @@ PDF_CHUNK_OVERLAP: int = _optional_int("PDF_CHUNK_OVERLAP", 100)
 VIDEO_MAX_SCENE_DURATION: float = _optional_float("VIDEO_MAX_SCENE_DURATION", 120.0)  # Gemini API hard limit (seconds)
 VIDEO_FORCED_SPLIT_OVERLAP: float = _optional_float("VIDEO_FORCED_SPLIT_OVERLAP", 5.0)  # overlap between forced sub-segments
 VIDEO_SUMMARY_MAX_TOKENS: int = _optional_int("VIDEO_SUMMARY_MAX_TOKENS", 2048)  # gemini-embedding-2-preview hard limit is 8192; 2048 is enough for a 128s clip
+AUDIO_SEMANTIC_SIMILARITY_THRESHOLD: float = _optional_float("AUDIO_SEMANTIC_SIMILARITY_THRESHOLD", 0.65)  # cosine sim below this → semantic boundary
+AUDIO_SHORT_MERGE_THRESHOLD_S: float = _optional_float("AUDIO_SHORT_MERGE_THRESHOLD_S", 60.0)  # merge same-speaker groups below this combined duration
+AUDIO_HARD_CEILING_S: float = _optional_float("AUDIO_HARD_CEILING_S", 75.0)  # force-split any chunk exceeding this
+AUDIO_FORCED_SPLIT_OVERLAP_S: float = _optional_float("AUDIO_FORCED_SPLIT_OVERLAP_S", 5.0)  # backward overlap at forced splits
+AUDIO_TRANSCRIPTION_SEGMENT_S: float = _optional_float("AUDIO_TRANSCRIPTION_SEGMENT_S", 900.0)  # core window size per transcription call (seconds)
+AUDIO_TRANSCRIPTION_OVERLAP_S: float = _optional_float("AUDIO_TRANSCRIPTION_OVERLAP_S", 30.0)  # overlap on each side of a window so boundary sentences aren't cut in half
+AUDIO_TRANSCRIPTION_MAX_TOKENS: int = _optional_int("AUDIO_TRANSCRIPTION_MAX_TOKENS", 32768)  # max output tokens per transcription window (~900s → ~6600 tokens; 32768 is safe headroom)
 TMP_UPLOAD_DIR: str = _optional("TMP_UPLOAD_DIR", "./tmp")
 TMP_UPLOADS_DIR: str = str(Path(_optional("TMP_UPLOAD_DIR", "./tmp")) / "uploads")
 
