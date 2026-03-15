@@ -33,10 +33,14 @@ _gemini_client = genai.Client(api_key=config.GEMINI_API_KEY)
 
 _MAX_SCENE_DURATION: float = config.VIDEO_MAX_SCENE_DURATION
 _FORCED_SPLIT_OVERLAP: float = config.VIDEO_FORCED_SPLIT_OVERLAP
+_SUMMARY_MAX_TOKENS: int = config.VIDEO_SUMMARY_MAX_TOKENS
 _VISUAL_SUMMARY_PROMPT: str = (
-    "First, transcribe or closely paraphrase the key things said "
-    "(speech, narration, dialogue). Then describe what is visually happening. "
-    "Include tone, emphasis, and any specific terms, names, or numbers mentioned."
+    "Analyze this video clip and respond in exactly two parts:\n\n"
+    "SPEECH: Transcribe everything spoken word-for-word. "
+    "If nothing is said, write 'No speech.'\n\n"
+    "VISUALS: Describe the scene — who is present, their appearance, "
+    "setting, actions, tone, and any visible text or objects.\n\n"
+    "Do not add any other commentary or headings."
 )
 
 
@@ -123,10 +127,10 @@ def _extract_clip_bytes(filepath: str, start_s: float, end_s: float) -> bytes:
 
 def _generate_visual_summary(video_bytes: bytes) -> str:
     """
-    Send a video clip to Gemini Flash and return a transcript + visual description.
+    Send a video clip to Gemini Flash and return a structured SPEECH + VISUALS summary.
 
-    Gemini processes both the audio track (speech) and video frames, so the
-    summary captures what was said, not just what was seen.
+    Output format is enforced by the prompt: "SPEECH: ..." then "VISUALS: ...".
+    When no speech is detected Gemini writes "No speech." rather than omitting the section.
     Returns empty string on failure.
     """
     try:
@@ -136,6 +140,7 @@ def _generate_visual_summary(video_bytes: bytes) -> str:
         response = _gemini_client.models.generate_content(
             model="gemini-3.1-flash-lite-preview",
             contents=[video_part, _VISUAL_SUMMARY_PROMPT],
+            config=genai_types.GenerateContentConfig(max_output_tokens=_SUMMARY_MAX_TOKENS),
         )
         text = "".join(
             part.text

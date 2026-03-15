@@ -95,6 +95,7 @@ PDF_CHUNK_SIZE: int = _optional_int("PDF_CHUNK_SIZE", 800)
 PDF_CHUNK_OVERLAP: int = _optional_int("PDF_CHUNK_OVERLAP", 100)
 VIDEO_MAX_SCENE_DURATION: float = _optional_float("VIDEO_MAX_SCENE_DURATION", 120.0)  # Gemini API hard limit (seconds)
 VIDEO_FORCED_SPLIT_OVERLAP: float = _optional_float("VIDEO_FORCED_SPLIT_OVERLAP", 5.0)  # overlap between forced sub-segments
+VIDEO_SUMMARY_MAX_TOKENS: int = _optional_int("VIDEO_SUMMARY_MAX_TOKENS", 2048)  # gemini-embedding-2-preview hard limit is 8192; 2048 is enough for a 128s clip
 TMP_UPLOAD_DIR: str = _optional("TMP_UPLOAD_DIR", "./tmp")
 TMP_UPLOADS_DIR: str = str(Path(_optional("TMP_UPLOAD_DIR", "./tmp")) / "uploads")
 
