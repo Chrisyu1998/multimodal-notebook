@@ -67,6 +67,8 @@ def add_chunks(chunks: list[dict]) -> None:
                 "file_hash": c["file_hash"],
                 "page": c["page"],
                 "chunk_index": c["chunk_index"],
+                "modality": c.get("modality", ""),
+                "type": c.get("type", ""),
             }
             for c in new_chunks
         ],

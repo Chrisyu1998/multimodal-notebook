@@ -41,6 +41,8 @@ def make_chunk(
     chunk_index: int,
     embedding: list[float],
     file_hash: str = FAKE_HASH,
+    modality: str = "pdf",
+    type_: str = "document",
 ) -> dict:
     return {
         "text": text,
@@ -49,6 +51,8 @@ def make_chunk(
         "page": page,
         "chunk_index": chunk_index,
         "embedding": embedding,
+        "modality": modality,
+        "type": type_,
     }
 
 
@@ -123,7 +127,8 @@ def test_add_chunks_empty_list_is_noop(store):
 
 
 def test_add_chunks_stores_correct_metadata(store):
-    chunk = make_chunk("Some text.", "report.pdf", 3, 7, unit_vector(), file_hash=FAKE_HASH)
+    chunk = make_chunk("Some text.", "report.pdf", 3, 7, unit_vector(), file_hash=FAKE_HASH,
+                       modality="video_clip", type_="video")
     vs.add_chunks([chunk])
 
     result = store.get(include=["metadatas"])
@@ -132,6 +137,8 @@ def test_add_chunks_stores_correct_metadata(store):
     assert meta["file_hash"] == FAKE_HASH
     assert meta["page"] == 3
     assert meta["chunk_index"] == 7
+    assert meta["modality"] == "video_clip"
+    assert meta["type"] == "video"
 
 
 def test_add_chunks_stores_correct_document(store):

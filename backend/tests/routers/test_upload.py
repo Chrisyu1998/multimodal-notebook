@@ -34,6 +34,45 @@ _PDF_HASH = hashlib.sha256(_PDF_CONTENT).hexdigest()
 
 _PNG_CONTENT = b"fake png content"
 
+_MP4_CONTENT = b"fake mp4 content"
+_MP4_HASH = hashlib.sha256(_MP4_CONTENT).hexdigest()
+
+# Fake video chunks mirroring the dual-stream shape (Chunk A video_clip + Chunk B video_summary)
+_FAKE_VIDEO_CHUNKS = [
+    {
+        "type": "video",
+        "video_bytes": b"fake-mp4-scene-0",
+        "text": "A person explains rail transport network design.",
+        "source": "/tmp/clip.mp4",
+        "page": 0,
+        "chunk_index": 0,
+        "modality": "video_clip",
+        "parent_scene_id": "deadbeef" * 8,
+        "start_time_seconds": 0.0,
+        "end_time_seconds": 30.0,
+        "scene_index": 0,
+        "forced_split": False,
+    },
+    {
+        "type": "document",
+        "pdf_bytes": b"%PDF-fake",
+        "text": "A person explains rail transport network design.",
+        "source": "/tmp/clip.mp4",
+        "page": 0,
+        "chunk_index": 1,
+        "modality": "video_summary",
+        "parent_scene_id": "deadbeef" * 8,
+        "start_time_seconds": 0.0,
+        "end_time_seconds": 30.0,
+        "scene_index": 0,
+    },
+]
+_FAKE_VIDEO_EMBEDDED = [{"embedding": [0.5, 0.6], **c} for c in _FAKE_VIDEO_CHUNKS]
+
+# Fake video-only chunks (no Chunk B — visual summary was empty)
+_FAKE_VIDEO_CHUNKS_CLIP_ONLY = [_FAKE_VIDEO_CHUNKS[0]]
+_FAKE_VIDEO_EMBEDDED_CLIP_ONLY = [_FAKE_VIDEO_EMBEDDED[0]]
+
 # Fake image chunks mirroring the dual-stream shape (global + one local)
 _FAKE_IMAGE_CHUNKS = [
     {
@@ -607,6 +646,293 @@ class TestImageCornerCases:
         mock_embed.assert_called_once_with([])
         mock_add.assert_called_once_with([])
         assert body["status"] == "indexed"
+
+
+# ---------------------------------------------------------------------------
+# Happy path — Video
+# ---------------------------------------------------------------------------
+
+class TestVideoIngestion:
+    @pytest.mark.parametrize("filename", ["clip.mp4", "recording.mov"])
+    def test_returns_200(self, tmp_path, filename):
+        with patch("backend.config.TMP_UPLOADS_DIR", str(tmp_path)), \
+             patch("backend.routers.upload.vectorstore.is_file_indexed", return_value=False), \
+             patch("backend.routers.upload.chunking.chunk_video", return_value=_FAKE_VIDEO_CHUNKS), \
+             patch("backend.routers.upload.embeddings.embed_chunks", return_value=_FAKE_VIDEO_EMBEDDED), \
+             patch("backend.routers.upload.vectorstore.add_chunks"):
+            resp = _upload(filename, _MP4_CONTENT)
+        assert resp.status_code == 200
+
+    @pytest.mark.parametrize("filename", ["clip.mp4", "recording.mov"])
+    def test_status_is_indexed(self, tmp_path, filename):
+        with patch("backend.config.TMP_UPLOADS_DIR", str(tmp_path)), \
+             patch("backend.routers.upload.vectorstore.is_file_indexed", return_value=False), \
+             patch("backend.routers.upload.chunking.chunk_video", return_value=_FAKE_VIDEO_CHUNKS), \
+             patch("backend.routers.upload.embeddings.embed_chunks", return_value=_FAKE_VIDEO_EMBEDDED), \
+             patch("backend.routers.upload.vectorstore.add_chunks"):
+            body = _upload(filename, _MP4_CONTENT).json()
+        assert body["status"] == "indexed"
+
+    def test_response_fields_present(self, tmp_path):
+        with patch("backend.config.TMP_UPLOADS_DIR", str(tmp_path)), \
+             patch("backend.routers.upload.vectorstore.is_file_indexed", return_value=False), \
+             patch("backend.routers.upload.chunking.chunk_video", return_value=_FAKE_VIDEO_CHUNKS), \
+             patch("backend.routers.upload.embeddings.embed_chunks", return_value=_FAKE_VIDEO_EMBEDDED), \
+             patch("backend.routers.upload.vectorstore.add_chunks"):
+            body = _upload("clip.mp4", _MP4_CONTENT).json()
+        assert body["filename"] == "clip.mp4"
+        assert body["size_bytes"] == len(_MP4_CONTENT)
+        assert "file_id" in body
+
+    def test_pipeline_call_order(self, tmp_path):
+        """chunk_video → embed_chunks → add_chunks must be called in that order."""
+        call_order = []
+        mock_chunk = MagicMock(side_effect=lambda *a, **kw: call_order.append("chunk") or _FAKE_VIDEO_CHUNKS)
+        mock_embed = MagicMock(side_effect=lambda *a, **kw: call_order.append("embed") or _FAKE_VIDEO_EMBEDDED)
+        mock_add   = MagicMock(side_effect=lambda *a, **kw: call_order.append("add"))
+
+        with patch("backend.config.TMP_UPLOADS_DIR", str(tmp_path)), \
+             patch("backend.routers.upload.vectorstore.is_file_indexed", return_value=False), \
+             patch("backend.routers.upload.chunking.chunk_video", mock_chunk), \
+             patch("backend.routers.upload.embeddings.embed_chunks", mock_embed), \
+             patch("backend.routers.upload.vectorstore.add_chunks", mock_add):
+            _upload("clip.mp4", _MP4_CONTENT)
+
+        assert call_order == ["chunk", "embed", "add"]
+
+    def test_chunk_video_called_with_temp_file_path(self, tmp_path):
+        """chunk_video receives the saved temp path, not the original filename."""
+        mock_chunk = MagicMock(return_value=_FAKE_VIDEO_CHUNKS)
+
+        with patch("backend.config.TMP_UPLOADS_DIR", str(tmp_path)), \
+             patch("backend.routers.upload.vectorstore.is_file_indexed", return_value=False), \
+             patch("backend.routers.upload.chunking.chunk_video", mock_chunk), \
+             patch("backend.routers.upload.embeddings.embed_chunks", return_value=_FAKE_VIDEO_EMBEDDED), \
+             patch("backend.routers.upload.vectorstore.add_chunks"):
+            _upload("clip.mp4", _MP4_CONTENT)
+
+        called_path = mock_chunk.call_args[0][0]
+        assert called_path.startswith(str(tmp_path))
+        assert "clip.mp4" in called_path
+
+    def test_all_chunks_stamped_with_original_filename(self, tmp_path):
+        """source on every chunk (video_clip + video_summary) must be the original filename."""
+        captured = {}
+        def capture_embed(chunks):
+            captured["chunks"] = chunks
+            return _FAKE_VIDEO_EMBEDDED
+
+        with patch("backend.config.TMP_UPLOADS_DIR", str(tmp_path)), \
+             patch("backend.routers.upload.vectorstore.is_file_indexed", return_value=False), \
+             patch("backend.routers.upload.chunking.chunk_video", return_value=_FAKE_VIDEO_CHUNKS), \
+             patch("backend.routers.upload.embeddings.embed_chunks", side_effect=capture_embed), \
+             patch("backend.routers.upload.vectorstore.add_chunks"):
+            _upload("clip.mp4", _MP4_CONTENT)
+
+        for chunk in captured["chunks"]:
+            assert chunk["source"] == "clip.mp4"
+
+    def test_all_chunks_stamped_with_file_hash(self, tmp_path):
+        """file_hash on every chunk must equal the SHA-256 of the uploaded bytes."""
+        captured = {}
+        def capture_embed(chunks):
+            captured["chunks"] = chunks
+            return _FAKE_VIDEO_EMBEDDED
+
+        expected_hash = hashlib.sha256(_MP4_CONTENT).hexdigest()
+
+        with patch("backend.config.TMP_UPLOADS_DIR", str(tmp_path)), \
+             patch("backend.routers.upload.vectorstore.is_file_indexed", return_value=False), \
+             patch("backend.routers.upload.chunking.chunk_video", return_value=_FAKE_VIDEO_CHUNKS), \
+             patch("backend.routers.upload.embeddings.embed_chunks", side_effect=capture_embed), \
+             patch("backend.routers.upload.vectorstore.add_chunks"):
+            _upload("clip.mp4", _MP4_CONTENT)
+
+        for chunk in captured["chunks"]:
+            assert chunk["file_hash"] == expected_hash
+
+    def test_add_receives_embedded_output(self, tmp_path):
+        """add_chunks must be called with the list returned by embed_chunks."""
+        mock_add = MagicMock()
+
+        with patch("backend.config.TMP_UPLOADS_DIR", str(tmp_path)), \
+             patch("backend.routers.upload.vectorstore.is_file_indexed", return_value=False), \
+             patch("backend.routers.upload.chunking.chunk_video", return_value=_FAKE_VIDEO_CHUNKS), \
+             patch("backend.routers.upload.embeddings.embed_chunks", return_value=_FAKE_VIDEO_EMBEDDED), \
+             patch("backend.routers.upload.vectorstore.add_chunks", mock_add):
+            _upload("clip.mp4", _MP4_CONTENT)
+
+        mock_add.assert_called_once_with(_FAKE_VIDEO_EMBEDDED)
+
+    def test_chunk_pdf_not_called_for_video(self, tmp_path):
+        """chunk_pdf must never be invoked for a video upload."""
+        mock_pdf = MagicMock()
+
+        with patch("backend.config.TMP_UPLOADS_DIR", str(tmp_path)), \
+             patch("backend.routers.upload.vectorstore.is_file_indexed", return_value=False), \
+             patch("backend.routers.upload.chunking.chunk_video", return_value=_FAKE_VIDEO_CHUNKS), \
+             patch("backend.routers.upload.chunking.chunk_pdf", mock_pdf), \
+             patch("backend.routers.upload.embeddings.embed_chunks", return_value=_FAKE_VIDEO_EMBEDDED), \
+             patch("backend.routers.upload.vectorstore.add_chunks"):
+            _upload("clip.mp4", _MP4_CONTENT)
+
+        mock_pdf.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Video corner cases
+# ---------------------------------------------------------------------------
+
+class TestVideoCornerCases:
+    def test_chunk_video_failure_returns_upload_failed_to_index(self, tmp_path):
+        with patch("backend.config.TMP_UPLOADS_DIR", str(tmp_path)), \
+             patch("backend.routers.upload.vectorstore.is_file_indexed", return_value=False), \
+             patch("backend.routers.upload.chunking.chunk_video",
+                   side_effect=RuntimeError("ffmpeg error")):
+            body = _upload("clip.mp4", _MP4_CONTENT).json()
+        assert body["status"] == "upload_failed_to_index"
+
+    def test_chunk_video_failure_does_not_raise_500(self, tmp_path):
+        with patch("backend.config.TMP_UPLOADS_DIR", str(tmp_path)), \
+             patch("backend.routers.upload.vectorstore.is_file_indexed", return_value=False), \
+             patch("backend.routers.upload.chunking.chunk_video",
+                   side_effect=RuntimeError("ffmpeg error")):
+            resp = _upload("clip.mp4", _MP4_CONTENT)
+        assert resp.status_code == 200
+
+    def test_embed_failure_on_video_returns_upload_failed_to_index(self, tmp_path):
+        with patch("backend.config.TMP_UPLOADS_DIR", str(tmp_path)), \
+             patch("backend.routers.upload.vectorstore.is_file_indexed", return_value=False), \
+             patch("backend.routers.upload.chunking.chunk_video", return_value=_FAKE_VIDEO_CHUNKS), \
+             patch("backend.routers.upload.embeddings.embed_chunks",
+                   side_effect=RuntimeError("gemini 503")):
+            body = _upload("clip.mp4", _MP4_CONTENT).json()
+        assert body["status"] == "upload_failed_to_index"
+
+    def test_vectorstore_failure_on_video_returns_upload_failed_to_index(self, tmp_path):
+        with patch("backend.config.TMP_UPLOADS_DIR", str(tmp_path)), \
+             patch("backend.routers.upload.vectorstore.is_file_indexed", return_value=False), \
+             patch("backend.routers.upload.chunking.chunk_video", return_value=_FAKE_VIDEO_CHUNKS), \
+             patch("backend.routers.upload.embeddings.embed_chunks", return_value=_FAKE_VIDEO_EMBEDDED), \
+             patch("backend.routers.upload.vectorstore.add_chunks",
+                   side_effect=IOError("chroma down")):
+            body = _upload("clip.mp4", _MP4_CONTENT).json()
+        assert body["status"] == "upload_failed_to_index"
+
+    def test_failure_response_preserves_video_metadata(self, tmp_path):
+        """filename and size_bytes must be correct even when chunk_video fails."""
+        with patch("backend.config.TMP_UPLOADS_DIR", str(tmp_path)), \
+             patch("backend.routers.upload.vectorstore.is_file_indexed", return_value=False), \
+             patch("backend.routers.upload.chunking.chunk_video",
+                   side_effect=RuntimeError("boom")):
+            body = _upload("clip.mp4", _MP4_CONTENT).json()
+        assert body["filename"] == "clip.mp4"
+        assert body["size_bytes"] == len(_MP4_CONTENT)
+        assert "file_id" in body
+
+    def test_video_dedup_returns_already_indexed(self):
+        """Uploading a video with content already in the store → already_indexed."""
+        with patch("backend.routers.upload.vectorstore.is_file_indexed", return_value=True):
+            body = _upload("clip.mp4", _MP4_CONTENT).json()
+        assert body["status"] == "already_indexed"
+
+    def test_video_dedup_skips_chunk_video(self):
+        """chunk_video must not be called when the content is already indexed."""
+        mock_chunk = MagicMock()
+        with patch("backend.routers.upload.vectorstore.is_file_indexed", return_value=True), \
+             patch("backend.routers.upload.chunking.chunk_video", mock_chunk):
+            _upload("clip.mp4", _MP4_CONTENT)
+        mock_chunk.assert_not_called()
+
+    def test_add_chunks_not_called_after_video_embed_failure(self, tmp_path):
+        """If embed_chunks raises, add_chunks must not be called."""
+        mock_add = MagicMock()
+        with patch("backend.config.TMP_UPLOADS_DIR", str(tmp_path)), \
+             patch("backend.routers.upload.vectorstore.is_file_indexed", return_value=False), \
+             patch("backend.routers.upload.chunking.chunk_video", return_value=_FAKE_VIDEO_CHUNKS), \
+             patch("backend.routers.upload.embeddings.embed_chunks",
+                   side_effect=RuntimeError("api error")), \
+             patch("backend.routers.upload.vectorstore.add_chunks", mock_add):
+            _upload("clip.mp4", _MP4_CONTENT)
+        mock_add.assert_not_called()
+
+    def test_video_clip_and_summary_chunks_both_stamped(self, tmp_path):
+        """Both video_clip and video_summary chunks must get source + file_hash."""
+        captured = {}
+        def capture_embed(chunks):
+            captured["chunks"] = chunks
+            return _FAKE_VIDEO_EMBEDDED
+
+        with patch("backend.config.TMP_UPLOADS_DIR", str(tmp_path)), \
+             patch("backend.routers.upload.vectorstore.is_file_indexed", return_value=False), \
+             patch("backend.routers.upload.chunking.chunk_video", return_value=_FAKE_VIDEO_CHUNKS), \
+             patch("backend.routers.upload.embeddings.embed_chunks", side_effect=capture_embed), \
+             patch("backend.routers.upload.vectorstore.add_chunks"):
+            _upload("clip.mp4", _MP4_CONTENT)
+
+        assert len(captured["chunks"]) == 2
+        modalities = {c["modality"] for c in captured["chunks"]}
+        assert modalities == {"video_clip", "video_summary"}
+        for chunk in captured["chunks"]:
+            assert chunk["source"] == "clip.mp4"
+            assert "file_hash" in chunk
+
+    def test_clip_only_chunks_stamped_when_no_summaries(self, tmp_path):
+        """When chunk_video returns only Chunk A (no summaries), stamping still works."""
+        captured = {}
+        def capture_embed(chunks):
+            captured["chunks"] = chunks
+            return _FAKE_VIDEO_EMBEDDED_CLIP_ONLY
+
+        with patch("backend.config.TMP_UPLOADS_DIR", str(tmp_path)), \
+             patch("backend.routers.upload.vectorstore.is_file_indexed", return_value=False), \
+             patch("backend.routers.upload.chunking.chunk_video",
+                   return_value=_FAKE_VIDEO_CHUNKS_CLIP_ONLY), \
+             patch("backend.routers.upload.embeddings.embed_chunks", side_effect=capture_embed), \
+             patch("backend.routers.upload.vectorstore.add_chunks"):
+            body = _upload("clip.mp4", _MP4_CONTENT).json()
+
+        assert body["status"] == "indexed"
+        assert len(captured["chunks"]) == 1
+        assert captured["chunks"][0]["modality"] == "video_clip"
+        assert captured["chunks"][0]["source"] == "clip.mp4"
+
+    def test_empty_chunk_list_from_chunk_video_still_calls_embed(self, tmp_path):
+        """If chunk_video returns [], embed_chunks and add_chunks are still called."""
+        mock_embed = MagicMock(return_value=[])
+        mock_add = MagicMock()
+
+        with patch("backend.config.TMP_UPLOADS_DIR", str(tmp_path)), \
+             patch("backend.routers.upload.vectorstore.is_file_indexed", return_value=False), \
+             patch("backend.routers.upload.chunking.chunk_video", return_value=[]), \
+             patch("backend.routers.upload.embeddings.embed_chunks", mock_embed), \
+             patch("backend.routers.upload.vectorstore.add_chunks", mock_add):
+            body = _upload("clip.mp4", _MP4_CONTENT).json()
+
+        mock_embed.assert_called_once_with([])
+        mock_add.assert_called_once_with([])
+        assert body["status"] == "indexed"
+
+    def test_dedup_check_uses_content_hash_not_filename_for_video(self):
+        """Same video filename with different bytes → not a duplicate."""
+        mock_add = MagicMock()
+        with patch("backend.routers.upload.vectorstore.is_file_indexed", return_value=False), \
+             patch("backend.routers.upload.chunking.chunk_video", return_value=_FAKE_VIDEO_CHUNKS), \
+             patch("backend.routers.upload.embeddings.embed_chunks", return_value=_FAKE_VIDEO_EMBEDDED), \
+             patch("backend.routers.upload.vectorstore.add_chunks", mock_add):
+            _upload("clip.mp4", b"video version 1")
+            _upload("clip.mp4", b"video version 2")
+        assert mock_add.call_count == 2
+
+    def test_is_file_indexed_called_with_sha256_of_video_content(self):
+        """is_file_indexed must receive the SHA-256 of the video bytes."""
+        expected_hash = hashlib.sha256(_MP4_CONTENT).hexdigest()
+        mock_is_indexed = MagicMock(return_value=True)
+
+        with patch("backend.routers.upload.vectorstore.is_file_indexed", mock_is_indexed):
+            _upload("clip.mp4", _MP4_CONTENT)
+
+        mock_is_indexed.assert_called_once_with(expected_hash)
 
 
 # ---------------------------------------------------------------------------
