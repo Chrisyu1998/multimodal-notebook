@@ -42,6 +42,10 @@ def make_media_chunk(chunk_type: str, idx: int) -> dict:
     return {"type": chunk_type, bytes_field: b"\x00\x01" + bytes([idx]), "source": f"file_{idx}", "chunk_index": idx}
 
 
+def make_document_chunk(idx: int) -> dict:
+    return {"type": "document", "text": f"sample document text {idx}", "source": f"doc_{idx}", "chunk_index": idx}
+
+
 def capture_parts_call(model, contents):  # noqa: ARG001
     n = len(contents) if isinstance(contents, list) else 1
     return embed_response(*[fake_vector(float(i + 1)) for i in range(n)])
@@ -381,7 +385,7 @@ class TestEmbedChunksSingleFileTypes:
 
 class TestEmbedChunksDocument:
     def test_embedding_added(self):
-        chunk = make_media_chunk("document", 0)
+        chunk = make_document_chunk(0)
         with patch.object(emb._client.models, "embed_content", side_effect=capture_parts_call):
             result = emb.embed_chunks([chunk])
         assert "embedding" in result[0]
@@ -404,7 +408,7 @@ class TestEmbedChunksDocument:
 
     def test_batched_in_single_call(self):
         """3 document chunks must be sent in one API call, not three."""
-        chunks = [make_media_chunk("document", i) for i in range(3)]
+        chunks = [make_document_chunk(i) for i in range(3)]
         call_sizes: list[int] = []
 
         def capture(model, contents):  # noqa: ARG001
@@ -419,7 +423,7 @@ class TestEmbedChunksDocument:
     def test_batch_splits_at_document_batch_size(self):
         """batch_size+1 document chunks must produce exactly 2 API calls."""
         n = emb._DOCUMENT_BATCH_SIZE + 1
-        chunks = [make_media_chunk("document", i) for i in range(n)]
+        chunks = [make_document_chunk(i) for i in range(n)]
         call_sizes: list[int] = []
 
         def capture(model, contents):  # noqa: ARG001
@@ -442,7 +446,7 @@ class TestEmbedChunksMixed:
             make_image_chunk(0),
             make_media_chunk("video", 1),
             make_media_chunk("audio", 2),
-            make_media_chunk("document", 3),
+            make_document_chunk(3),
         ]
 
         with patch.object(emb._client.models, "embed_content", side_effect=capture_parts_call):

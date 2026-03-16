@@ -13,6 +13,11 @@ import backend.config as config
 
 _client = genai.Client(api_key=config.GEMINI_API_KEY)
 
+
+class GenerationError(RuntimeError):
+    """Raised when the Gemini generation API call fails (auth, rate limit, etc.)."""
+
+
 _SYSTEM_PROMPT = (
     "You are a helpful assistant. Answer the question using ONLY the context "
     "provided below. If the answer is not in the context, say "
@@ -51,14 +56,18 @@ def generate_answer(question: str, chunks: list[dict]) -> dict:
         logger.info(f"  Chunk {i} [{chunk.get('source')} p{chunk.get('page')}]: {preview!r}")
     logger.debug(f"Calling {config.GENERATION_MODEL} with {len(chunks)} context chunks")
 
-    response = _client.models.generate_content(
-        model=config.GENERATION_MODEL,
-        contents=user_message,
-        config=types.GenerateContentConfig(
-            system_instruction=_SYSTEM_PROMPT,
-            temperature=0.0,
-        ),
-    )
+    try:
+        response = _client.models.generate_content(
+            model=config.GENERATION_MODEL,
+            contents=user_message,
+            config=types.GenerateContentConfig(
+                system_instruction=_SYSTEM_PROMPT,
+                temperature=0.0,
+            ),
+        )
+    except Exception as exc:
+        logger.error(f"Gemini generation API failed: {exc}")
+        raise GenerationError(str(exc)) from exc
 
     answer_text = response.text.strip()
 

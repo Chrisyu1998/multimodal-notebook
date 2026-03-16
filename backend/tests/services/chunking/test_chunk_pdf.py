@@ -65,7 +65,7 @@ def _word(n: int) -> str:
 # ---------------------------------------------------------------------------
 
 REQUIRED_KEYS = {
-    "type", "pdf_bytes", "text", "source", "page",
+    "type", "text", "source", "page",
     "chunk_index", "modality", "section_heading", "document_title",
 }
 
@@ -88,7 +88,6 @@ class TestChunkSchema:
             ch = chunks[0]
             assert ch["type"] == "document"
             assert ch["modality"] == "pdf"
-            assert isinstance(ch["pdf_bytes"], bytes) and len(ch["pdf_bytes"]) > 0
             assert isinstance(ch["text"], str) and ch["text"]
             assert isinstance(ch["page"], int) and ch["page"] >= 1
             assert isinstance(ch["chunk_index"], int) and ch["chunk_index"] == 0
@@ -116,13 +115,12 @@ class TestChunkSchema:
         finally:
             os.unlink(path)
 
-    def test_pdf_bytes_is_valid_pdf(self):
+    def test_text_field_is_not_empty(self):
+        """The text field must contain non-empty string content."""
         path = _make_pdf(["Hello world."])
         try:
             chunks = chunk_pdf(path)
-            raw = chunks[0]["pdf_bytes"]
-            # PDF magic bytes
-            assert raw[:4] == b"%PDF", "pdf_bytes does not start with PDF magic bytes"
+            assert chunks[0]["text"].strip(), "text field must not be empty"
         finally:
             os.unlink(path)
 

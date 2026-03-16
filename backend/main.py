@@ -103,8 +103,6 @@ def _log_config() -> None:
     logger.info(f"  CHROMA_PERSIST_DIR       : {config.CHROMA_PERSIST_DIR}")
     logger.info(f"  CHROMA_COLLECTION_NAME   : {config.CHROMA_COLLECTION_NAME}")
     # Chunking
-    logger.info(f"  CHUNK_SIZE               : {config.CHUNK_SIZE}")
-    logger.info(f"  CHUNK_OVERLAP            : {config.CHUNK_OVERLAP}")
     logger.info(f"  TMP_UPLOAD_DIR           : {config.TMP_UPLOAD_DIR}")
     # Retrieval
     logger.info(f"  BM25_TOP_K               : {config.BM25_TOP_K}")

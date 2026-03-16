@@ -48,7 +48,12 @@ def chunk_pdf(filepath: str) -> list[dict]:
       100-token overlap at mid-section splits, hard ceiling of 800 tokens.
     Step 3 — Return chunk dicts with all required keys.
     """
-    doc = fitz.open(filepath)
+    try:
+        doc = fitz.open(filepath)
+    except Exception as exc:
+        logger.error(f"chunk_pdf: fitz failed to open {filepath!r}: {exc}")
+        raise ValueError(f"Could not open PDF '{Path(filepath).name}': {exc}") from exc
+
     title: str = (doc.metadata.get("title") or "").strip() or Path(filepath).stem
 
     # Build sorted (page_num, heading) list from TOC (1-indexed page numbers)

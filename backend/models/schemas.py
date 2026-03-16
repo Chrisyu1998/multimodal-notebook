@@ -16,6 +16,7 @@ class UploadResponse(BaseModel):
     filename: str
     size_bytes: int
     status: str
+    num_chunks: int = 0
 
 
 class IngestResponse(BaseModel):

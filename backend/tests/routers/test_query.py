@@ -191,11 +191,11 @@ class TestQueryNoChunks:
 # ---------------------------------------------------------------------------
 
 class TestQueryServiceFailures:
-    def test_502_when_embed_text_raises(self):
+    def test_503_when_embed_text_raises(self):
         with patch("backend.routers.query.embeddings.embed_text",
                    side_effect=RuntimeError("Gemini down")):
             resp = client.post("/query/", json={"question": "test"})
-        assert resp.status_code == 502
+        assert resp.status_code == 503
         assert "embed" in resp.json()["detail"].lower()
 
     def test_502_when_vectorstore_search_raises(self):

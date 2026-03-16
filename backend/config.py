@@ -48,7 +48,6 @@ def _optional_float(name: str, default: float) -> float:
 GEMINI_API_KEY: str = _require("GEMINI_API_KEY")
 
 EMBEDDING_MODEL: str = "gemini-embedding-2-preview"  # natively multimodal
-EMBEDDING_BATCH_SIZE: int = _optional_int("EMBEDDING_BATCH_SIZE", 20)
 EMBEDDING_IMAGE_BATCH_SIZE: int = _optional_int("EMBEDDING_IMAGE_BATCH_SIZE", 6)        # hard API limit
 EMBEDDING_DOCUMENT_BATCH_SIZE: int = _optional_int("EMBEDDING_DOCUMENT_BATCH_SIZE", 20)   # 20,000 token limit / ~800 tokens per PDF chunk ≈ 25 max; 20 is a safe default
 EMBEDDING_MAX_RETRIES: int = _optional_int("EMBEDDING_MAX_RETRIES", 3)
@@ -89,8 +88,6 @@ MAX_FILE_SIZE_MB: int = _optional_int("MAX_FILE_SIZE_MB", 500)
 # Chunking
 # ============================================================
 
-CHUNK_SIZE: int = _optional_int("CHUNK_SIZE", 512)
-CHUNK_OVERLAP: int = _optional_int("CHUNK_OVERLAP", 64)
 PDF_CHUNK_SIZE: int = _optional_int("PDF_CHUNK_SIZE", 800)
 PDF_CHUNK_OVERLAP: int = _optional_int("PDF_CHUNK_OVERLAP", 100)
 VIDEO_MAX_SCENE_DURATION: float = _optional_float("VIDEO_MAX_SCENE_DURATION", 120.0)  # Gemini API hard limit (seconds)

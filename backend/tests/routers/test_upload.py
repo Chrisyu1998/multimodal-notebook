@@ -408,46 +408,44 @@ class TestChunkerDispatch:
 # ---------------------------------------------------------------------------
 
 class TestIngestionFailure:
-    def test_chunker_failure_returns_200(self, tmp_path):
+    def test_chunker_failure_returns_422(self, tmp_path):
         with patch("backend.config.TMP_UPLOADS_DIR", str(tmp_path)), \
              patch("backend.routers.upload.vectorstore.is_file_indexed", return_value=False), \
              patch("backend.routers.upload.chunking.chunk_pdf", side_effect=RuntimeError("boom")):
             resp = _upload("report.pdf")
-        assert resp.status_code == 200
+        assert resp.status_code == 422
 
-    def test_chunker_failure_status_is_upload_failed_to_index(self, tmp_path):
+    def test_chunker_failure_detail_mentions_parse(self, tmp_path):
         with patch("backend.config.TMP_UPLOADS_DIR", str(tmp_path)), \
              patch("backend.routers.upload.vectorstore.is_file_indexed", return_value=False), \
              patch("backend.routers.upload.chunking.chunk_pdf", side_effect=RuntimeError("boom")):
             body = _upload("report.pdf").json()
-        assert body["status"] == "upload_failed_to_index"
+        assert "parse" in body["detail"].lower()
 
-    def test_embed_failure_status_is_upload_failed_to_index(self, tmp_path):
+    def test_embed_failure_returns_503(self, tmp_path):
         with patch("backend.config.TMP_UPLOADS_DIR", str(tmp_path)), \
              patch("backend.routers.upload.vectorstore.is_file_indexed", return_value=False), \
              patch("backend.routers.upload.chunking.chunk_pdf", return_value=_FAKE_CHUNKS), \
              patch("backend.routers.upload.embeddings.embed_chunks", side_effect=ValueError("api error")):
-            body = _upload("report.pdf").json()
-        assert body["status"] == "upload_failed_to_index"
+            resp = _upload("report.pdf")
+        assert resp.status_code == 503
 
-    def test_vectorstore_failure_status_is_upload_failed_to_index(self, tmp_path):
+    def test_vectorstore_failure_returns_503(self, tmp_path):
         with patch("backend.config.TMP_UPLOADS_DIR", str(tmp_path)), \
              patch("backend.routers.upload.vectorstore.is_file_indexed", return_value=False), \
              patch("backend.routers.upload.chunking.chunk_pdf", return_value=_FAKE_CHUNKS), \
              patch("backend.routers.upload.embeddings.embed_chunks", return_value=_FAKE_EMBEDDED), \
              patch("backend.routers.upload.vectorstore.add_chunks", side_effect=IOError("chroma down")):
-            body = _upload("report.pdf").json()
-        assert body["status"] == "upload_failed_to_index"
+            resp = _upload("report.pdf")
+        assert resp.status_code == 503
 
-    def test_failure_response_preserves_metadata(self, tmp_path):
-        """file_id, filename, and size_bytes must still be correct on failure."""
+    def test_chunker_failure_does_not_return_500(self, tmp_path):
+        """Chunker errors must never surface as 500."""
         with patch("backend.config.TMP_UPLOADS_DIR", str(tmp_path)), \
              patch("backend.routers.upload.vectorstore.is_file_indexed", return_value=False), \
              patch("backend.routers.upload.chunking.chunk_pdf", side_effect=RuntimeError("boom")):
-            body = _upload("report.pdf", b"12345").json()
-        assert body["filename"] == "report.pdf"
-        assert body["size_bytes"] == 5
-        assert "file_id" in body
+            resp = _upload("report.pdf", b"12345")
+        assert resp.status_code != 500
 
     def test_add_chunks_not_called_after_embed_failure(self, tmp_path):
         """If embed_chunks raises, add_chunks must never be called."""
@@ -597,14 +595,14 @@ class TestImageIngestion:
 # ---------------------------------------------------------------------------
 
 class TestImageCornerCases:
-    def test_value_error_from_chunk_image_returns_upload_failed_to_index(self, tmp_path):
-        """chunk_image raises ValueError for format mismatch — must not 500."""
+    def test_value_error_from_chunk_image_returns_422(self, tmp_path):
+        """chunk_image raises ValueError for format mismatch — must return 422."""
         with patch("backend.config.TMP_UPLOADS_DIR", str(tmp_path)), \
              patch("backend.routers.upload.vectorstore.is_file_indexed", return_value=False), \
              patch("backend.routers.upload.chunking.chunk_image",
                    side_effect=ValueError("unsupported format 'BMP'")):
-            body = _upload("photo.png", b"BM fake bmp").json()
-        assert body["status"] == "upload_failed_to_index"
+            resp = _upload("photo.png", b"BM fake bmp")
+        assert resp.status_code == 422
 
     def test_value_error_from_chunk_image_does_not_raise_500(self, tmp_path):
         with patch("backend.config.TMP_UPLOADS_DIR", str(tmp_path)), \
@@ -612,35 +610,33 @@ class TestImageCornerCases:
              patch("backend.routers.upload.chunking.chunk_image",
                    side_effect=ValueError("unsupported format 'BMP'")):
             resp = _upload("photo.png", b"BM fake bmp")
-        assert resp.status_code == 200
+        assert resp.status_code != 500
 
-    def test_embed_failure_on_image_returns_upload_failed_to_index(self, tmp_path):
+    def test_embed_failure_on_image_returns_503(self, tmp_path):
         with patch("backend.config.TMP_UPLOADS_DIR", str(tmp_path)), \
              patch("backend.routers.upload.vectorstore.is_file_indexed", return_value=False), \
              patch("backend.routers.upload.chunking.chunk_image", return_value=_FAKE_IMAGE_CHUNKS), \
              patch("backend.routers.upload.embeddings.embed_chunks", side_effect=RuntimeError("gemini down")):
-            body = _upload("photo.png", _PNG_CONTENT).json()
-        assert body["status"] == "upload_failed_to_index"
+            resp = _upload("photo.png", _PNG_CONTENT)
+        assert resp.status_code == 503
 
-    def test_vectorstore_failure_on_image_returns_upload_failed_to_index(self, tmp_path):
+    def test_vectorstore_failure_on_image_returns_503(self, tmp_path):
         with patch("backend.config.TMP_UPLOADS_DIR", str(tmp_path)), \
              patch("backend.routers.upload.vectorstore.is_file_indexed", return_value=False), \
              patch("backend.routers.upload.chunking.chunk_image", return_value=_FAKE_IMAGE_CHUNKS), \
              patch("backend.routers.upload.embeddings.embed_chunks", return_value=_FAKE_IMAGE_EMBEDDED), \
              patch("backend.routers.upload.vectorstore.add_chunks", side_effect=IOError("chroma down")):
-            body = _upload("photo.png", _PNG_CONTENT).json()
-        assert body["status"] == "upload_failed_to_index"
+            resp = _upload("photo.png", _PNG_CONTENT)
+        assert resp.status_code == 503
 
-    def test_failure_response_preserves_image_metadata(self, tmp_path):
-        """filename and size_bytes must be correct even when chunk_image fails."""
+    def test_chunk_image_failure_does_not_return_500(self, tmp_path):
+        """Chunker errors must never surface as 500."""
         with patch("backend.config.TMP_UPLOADS_DIR", str(tmp_path)), \
              patch("backend.routers.upload.vectorstore.is_file_indexed", return_value=False), \
              patch("backend.routers.upload.chunking.chunk_image",
                    side_effect=RuntimeError("boom")):
-            body = _upload("photo.png", _PNG_CONTENT).json()
-        assert body["filename"] == "photo.png"
-        assert body["size_bytes"] == len(_PNG_CONTENT)
-        assert "file_id" in body
+            resp = _upload("photo.png", _PNG_CONTENT)
+        assert resp.status_code != 500
 
     def test_image_dedup_returns_already_indexed(self):
         """Uploading an image with content already in the store → already_indexed."""
@@ -840,13 +836,13 @@ class TestVideoIngestion:
 # ---------------------------------------------------------------------------
 
 class TestVideoCornerCases:
-    def test_chunk_video_failure_returns_upload_failed_to_index(self, tmp_path):
+    def test_chunk_video_failure_returns_422(self, tmp_path):
         with patch("backend.config.TMP_UPLOADS_DIR", str(tmp_path)), \
              patch("backend.routers.upload.vectorstore.is_file_indexed", return_value=False), \
              patch("backend.routers.upload.chunking.chunk_video",
                    side_effect=RuntimeError("ffmpeg error")):
-            body = _upload("clip.mp4", _MP4_CONTENT).json()
-        assert body["status"] == "upload_failed_to_index"
+            resp = _upload("clip.mp4", _MP4_CONTENT)
+        assert resp.status_code == 422
 
     def test_chunk_video_failure_does_not_raise_500(self, tmp_path):
         with patch("backend.config.TMP_UPLOADS_DIR", str(tmp_path)), \
@@ -854,37 +850,35 @@ class TestVideoCornerCases:
              patch("backend.routers.upload.chunking.chunk_video",
                    side_effect=RuntimeError("ffmpeg error")):
             resp = _upload("clip.mp4", _MP4_CONTENT)
-        assert resp.status_code == 200
+        assert resp.status_code != 500
 
-    def test_embed_failure_on_video_returns_upload_failed_to_index(self, tmp_path):
+    def test_embed_failure_on_video_returns_503(self, tmp_path):
         with patch("backend.config.TMP_UPLOADS_DIR", str(tmp_path)), \
              patch("backend.routers.upload.vectorstore.is_file_indexed", return_value=False), \
              patch("backend.routers.upload.chunking.chunk_video", return_value=_FAKE_VIDEO_CHUNKS), \
              patch("backend.routers.upload.embeddings.embed_chunks",
                    side_effect=RuntimeError("gemini 503")):
-            body = _upload("clip.mp4", _MP4_CONTENT).json()
-        assert body["status"] == "upload_failed_to_index"
+            resp = _upload("clip.mp4", _MP4_CONTENT)
+        assert resp.status_code == 503
 
-    def test_vectorstore_failure_on_video_returns_upload_failed_to_index(self, tmp_path):
+    def test_vectorstore_failure_on_video_returns_503(self, tmp_path):
         with patch("backend.config.TMP_UPLOADS_DIR", str(tmp_path)), \
              patch("backend.routers.upload.vectorstore.is_file_indexed", return_value=False), \
              patch("backend.routers.upload.chunking.chunk_video", return_value=_FAKE_VIDEO_CHUNKS), \
              patch("backend.routers.upload.embeddings.embed_chunks", return_value=_FAKE_VIDEO_EMBEDDED), \
              patch("backend.routers.upload.vectorstore.add_chunks",
                    side_effect=IOError("chroma down")):
-            body = _upload("clip.mp4", _MP4_CONTENT).json()
-        assert body["status"] == "upload_failed_to_index"
+            resp = _upload("clip.mp4", _MP4_CONTENT)
+        assert resp.status_code == 503
 
-    def test_failure_response_preserves_video_metadata(self, tmp_path):
-        """filename and size_bytes must be correct even when chunk_video fails."""
+    def test_chunk_video_failure_does_not_return_500_detail(self, tmp_path):
+        """Chunker errors must return 422 not 500."""
         with patch("backend.config.TMP_UPLOADS_DIR", str(tmp_path)), \
              patch("backend.routers.upload.vectorstore.is_file_indexed", return_value=False), \
              patch("backend.routers.upload.chunking.chunk_video",
                    side_effect=RuntimeError("boom")):
-            body = _upload("clip.mp4", _MP4_CONTENT).json()
-        assert body["filename"] == "clip.mp4"
-        assert body["size_bytes"] == len(_MP4_CONTENT)
-        assert "file_id" in body
+            resp = _upload("clip.mp4", _MP4_CONTENT)
+        assert resp.status_code == 422
 
     def test_video_dedup_returns_already_indexed(self):
         """Uploading a video with content already in the store → already_indexed."""
@@ -1175,13 +1169,13 @@ class TestAudioIngestion:
 # ---------------------------------------------------------------------------
 
 class TestAudioCornerCases:
-    def test_chunk_audio_failure_returns_upload_failed_to_index(self, tmp_path):
+    def test_chunk_audio_failure_returns_422(self, tmp_path):
         with patch("backend.config.TMP_UPLOADS_DIR", str(tmp_path)), \
              patch("backend.routers.upload.vectorstore.is_file_indexed", return_value=False), \
              patch("backend.routers.upload.chunking.chunk_audio",
                    side_effect=ValueError("transcription returned no segments")):
-            body = _upload("talk.mp3", _AUDIO_CONTENT).json()
-        assert body["status"] == "upload_failed_to_index"
+            resp = _upload("talk.mp3", _AUDIO_CONTENT)
+        assert resp.status_code == 422
 
     def test_chunk_audio_failure_does_not_raise_500(self, tmp_path):
         with patch("backend.config.TMP_UPLOADS_DIR", str(tmp_path)), \
@@ -1189,37 +1183,35 @@ class TestAudioCornerCases:
              patch("backend.routers.upload.chunking.chunk_audio",
                    side_effect=RuntimeError("gemini api error")):
             resp = _upload("talk.mp3", _AUDIO_CONTENT)
-        assert resp.status_code == 200
+        assert resp.status_code != 500
 
-    def test_embed_failure_on_audio_returns_upload_failed_to_index(self, tmp_path):
+    def test_embed_failure_on_audio_returns_503(self, tmp_path):
         with patch("backend.config.TMP_UPLOADS_DIR", str(tmp_path)), \
              patch("backend.routers.upload.vectorstore.is_file_indexed", return_value=False), \
              patch("backend.routers.upload.chunking.chunk_audio", return_value=_FAKE_AUDIO_CHUNKS), \
              patch("backend.routers.upload.embeddings.embed_chunks",
                    side_effect=RuntimeError("gemini 503")):
-            body = _upload("talk.mp3", _AUDIO_CONTENT).json()
-        assert body["status"] == "upload_failed_to_index"
+            resp = _upload("talk.mp3", _AUDIO_CONTENT)
+        assert resp.status_code == 503
 
-    def test_vectorstore_failure_on_audio_returns_upload_failed_to_index(self, tmp_path):
+    def test_vectorstore_failure_on_audio_returns_503(self, tmp_path):
         with patch("backend.config.TMP_UPLOADS_DIR", str(tmp_path)), \
              patch("backend.routers.upload.vectorstore.is_file_indexed", return_value=False), \
              patch("backend.routers.upload.chunking.chunk_audio", return_value=_FAKE_AUDIO_CHUNKS), \
              patch("backend.routers.upload.embeddings.embed_chunks", return_value=_FAKE_AUDIO_EMBEDDED), \
              patch("backend.routers.upload.vectorstore.add_chunks",
                    side_effect=IOError("chroma down")):
-            body = _upload("talk.mp3", _AUDIO_CONTENT).json()
-        assert body["status"] == "upload_failed_to_index"
+            resp = _upload("talk.mp3", _AUDIO_CONTENT)
+        assert resp.status_code == 503
 
-    def test_failure_response_preserves_audio_metadata(self, tmp_path):
-        """filename and size_bytes must be correct even when chunk_audio fails."""
+    def test_chunk_audio_failure_does_not_return_500_detail(self, tmp_path):
+        """Chunker errors must return 422 not 500."""
         with patch("backend.config.TMP_UPLOADS_DIR", str(tmp_path)), \
              patch("backend.routers.upload.vectorstore.is_file_indexed", return_value=False), \
              patch("backend.routers.upload.chunking.chunk_audio",
                    side_effect=RuntimeError("boom")):
-            body = _upload("talk.mp3", _AUDIO_CONTENT).json()
-        assert body["filename"] == "talk.mp3"
-        assert body["size_bytes"] == len(_AUDIO_CONTENT)
-        assert "file_id" in body
+            resp = _upload("talk.mp3", _AUDIO_CONTENT)
+        assert resp.status_code == 422
 
     def test_audio_dedup_returns_already_indexed(self):
         """Uploading audio with content already in the store → already_indexed."""
