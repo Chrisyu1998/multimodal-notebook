@@ -282,15 +282,28 @@ class TestLocalChunkSchema:
         finally:
             os.unlink(path)
 
-    def test_text_contains_filename_and_region_type(self):
+    def test_text_contains_caption_and_region_type(self):
+        """Local chunk text must lead with the crop caption and include region_type."""
         path = _make_image_file()
         try:
             with _patch_gemini(_TWO_REGIONS):
                 chunks = chunk_image(path)
-            filename = os.path.basename(path)
             local = chunks[1]
-            assert filename in local["text"]
+            assert _FAKE_CAPTION in local["text"]
             assert local["region_type"] in local["text"]
+        finally:
+            os.unlink(path)
+
+    def test_local_text_falls_back_to_filename_when_caption_empty(self):
+        """When crop caption is empty the text must fall back to the filename-based string."""
+        path = _make_image_file()
+        try:
+            with _patch_chunk_image(_TWO_REGIONS, caption=""):
+                chunks = chunk_image(path)
+            filename = os.path.basename(path)
+            for local in chunks[1:]:
+                assert filename in local["text"]
+                assert local["region_type"] in local["text"]
         finally:
             os.unlink(path)
 

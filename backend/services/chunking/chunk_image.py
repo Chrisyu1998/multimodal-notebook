@@ -67,15 +67,10 @@ Coordinates are pixel values [x1, y1, x2, y2] where (0,0) is top-left.
 ]"""
 
 _CAPTION_PROMPT: str = (
-    "Analyze this image and respond in exactly two parts:\n\n"
-    "TRANSCRIPTION: Extract all visible text verbatim — titles, headings, labels, "
-    "axis values, legend entries, bullet points, table cells, captions, annotations, "
-    "and any other readable text in the image. Preserve technical terms, codes, and "
-    "numbers exactly as written. If there is no text, write 'No text.'\n\n"
-    "DESCRIPTION: Describe the visual content — the image type (diagram, chart, photo, "
-    "screenshot, etc.), what it depicts, key entities, relationships, structure, and "
-    "purpose. Be specific and factual.\n\n"
-    "Do not add any other commentary or headings."
+    "Describe this image for a search index. Write 2-4 sentences covering: "
+    "what type of image it is, what it shows, all visible text and labels verbatim, "
+    "and key entities depicted. Be specific and dense with terminology. "
+    "Do not use headers or structured formatting."
 )
 
 
@@ -121,11 +116,10 @@ def _rescue_oob_bbox(
 
 
 def _generate_image_caption(image_bytes: bytes, mime_type: str) -> str:
-    """Generate a rich text caption for an image via Gemini Flash.
+    """Generate a dense prose caption for an image via Gemini Flash.
 
-    Output format: "TRANSCRIPTION: ... DESCRIPTION: ..."
-    Captures both verbatim text (for BM25 exact-term matching) and semantic
-    description (for paraphrase coverage).
+    Returns 2-4 sentences covering image type, content, visible text, and key
+    entities — optimised for embedding-based retrieval and BM25 keyword search.
     Returns empty string on failure — callers fall back to filename.
     """
     try:
@@ -139,6 +133,7 @@ def _generate_image_caption(image_bytes: bytes, mime_type: str) -> str:
             for part in response.candidates[0].content.parts
             if hasattr(part, "text") and part.text
         ).strip()
+        text = re.sub(r"(?i)(transcription|description)\s*:\s*", "", text).strip()
         return text
     except Exception as exc:
         logger.warning(f"chunk_image: caption generation failed: {exc}")
@@ -157,7 +152,7 @@ def _detect_regions(
         region_prompt = _REGION_PROMPT_TEMPLATE.format(width=img_width, height=img_height)
         image_part = genai_types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
         response = _gemini_client.models.generate_content(
-            model="gemini-3-flash-preview",
+            model="gemini-2.5-flash",
             contents=[image_part, region_prompt],
         )
         response_text = "".join(
@@ -178,6 +173,31 @@ def _detect_regions(
         return []
 
 
+def _caption_all_crops(crops: list[tuple[bytes, str, str]]) -> list[str]:
+    """Caption a batch of image crops in parallel using _generate_image_caption.
+
+    Args:
+        crops: list of (crop_bytes, mime_type, label) tuples.
+
+    Returns:
+        List of caption strings, one per crop, in the same order.
+        Empty string for any crop that fails.
+    """
+    captions: list[str] = [""] * len(crops)
+    with ThreadPoolExecutor(max_workers=min(len(crops), 8)) as executor:
+        future_to_idx = {
+            executor.submit(_generate_image_caption, crop_bytes, mime_type): i
+            for i, (crop_bytes, mime_type, _label) in enumerate(crops)
+        }
+        for future in as_completed(future_to_idx):
+            idx = future_to_idx[future]
+            try:
+                captions[idx] = future.result()
+            except Exception as exc:
+                logger.warning(f"chunk_image: crop caption failed for index {idx}: {exc}")
+    return captions
+
+
 def chunk_image(filepath: str) -> list[dict]:
     """
     Dual-stream chunking for a single image file.
@@ -186,8 +206,8 @@ def chunk_image(filepath: str) -> list[dict]:
     caption as the text field for rich BM25 coverage.
     Stream 2: one local chunk per region of interest detected by Gemini Flash.
 
-    The caption call (gemini-2.5-flash) and region detection call
-    (gemini-3-flash-preview) run in parallel to avoid serial latency.
+    The caption call and region detection call both use gemini-2.5-flash
+    and run in parallel to avoid serial latency.
     Returns a combined list; does not call embed_chunks or add_chunks.
     """
     path = Path(filepath)
@@ -267,10 +287,9 @@ def chunk_image(filepath: str) -> list[dict]:
         )
     regions = deduped
 
-    chunk_index = 1
-    for region in regions:
-        region_index = chunk_index
-        chunk_index += 1
+    # ── Build valid crops first, then caption all in parallel ────────────────
+    valid_regions: list[tuple[dict, list[int], bytes, int, int]] = []  # (region, clamped, crop_bytes, crop_w, crop_h)
+    for region_index, region in enumerate(regions, start=1):
         try:
             region_type: str = region["region_type"]
             label: str = region.get("label", region_type)
@@ -301,36 +320,56 @@ def chunk_image(filepath: str) -> list[dict]:
                 f"chunk_image: region {region_index} — {region_type} '{label}' "
                 f"bbox=({x1_px},{y1_px},{x2_px},{y2_px}) for {filename}"
             )
-            chunks.append(
-                {
-                    "type": "image",
-                    "image_bytes": crop_bytes,
-                    "mime_type": mime_type,
-                    "text": f"Image: {filename} | Region: {region_type} | {label}",
-                    "source": filepath,
-                    "page": 0,
-                    "chunk_index": region_index,
-                    "modality": "image_local",
-                    "parent_image_id": global_image_id,
-                    "region_type": region_type,
-                    "label": label,
-                    "crop_bbox": [x1_px, y1_px, x2_px, y2_px],
-                    "width_px": crop_w,
-                    "height_px": crop_h,
-                    "crop_bbox_normalized": [
-                        x1_px / img_width,
-                        y1_px / img_height,
-                        x2_px / img_width,
-                        y2_px / img_height,
-                    ],
-                }
-            )
+            valid_regions.append((region, clamped, crop_bytes, crop_w, crop_h))
 
         except Exception as exc:
             logger.warning(
                 f"chunk_image: skipping bad region {region_index} in {filename}: {exc} — region={region}"
             )
             continue
+
+    # Caption all crops in parallel
+    crop_tuples: list[tuple[bytes, str, str]] = [
+        (crop_bytes, mime_type, r.get("label", r["region_type"]))
+        for r, _clamped, crop_bytes, _w, _h in valid_regions
+    ]
+    crop_captions = _caption_all_crops(crop_tuples) if crop_tuples else []
+
+    for local_idx, (region, clamped, crop_bytes, crop_w, crop_h) in enumerate(valid_regions):
+        chunk_index = local_idx + 1
+        region_type = region["region_type"]
+        label = region.get("label", region_type)
+        x1_px, y1_px, x2_px, y2_px = clamped
+        crop_caption = crop_captions[local_idx] if local_idx < len(crop_captions) else ""
+        text = (
+            f"{crop_caption} | Region: {region_type} | {label}"
+            if crop_caption
+            else f"Image: {filename} | Region: {region_type} | {label}"
+        )
+        chunks.append(
+            {
+                "type": "image",
+                "image_bytes": crop_bytes,
+                "mime_type": mime_type,
+                "text": text,
+                "source": filepath,
+                "page": 0,
+                "chunk_index": chunk_index,
+                "modality": "image_local",
+                "parent_image_id": global_image_id,
+                "region_type": region_type,
+                "label": label,
+                "crop_bbox": [x1_px, y1_px, x2_px, y2_px],
+                "width_px": crop_w,
+                "height_px": crop_h,
+                "crop_bbox_normalized": [
+                    x1_px / img_width,
+                    y1_px / img_height,
+                    x2_px / img_width,
+                    y2_px / img_height,
+                ],
+            }
+        )
 
     global_chunk["region_count"] = len(chunks) - 1
     return chunks
