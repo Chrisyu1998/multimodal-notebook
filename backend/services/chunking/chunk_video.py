@@ -27,7 +27,6 @@ from scenedetect import SceneManager, open_video
 from scenedetect.detectors import ContentDetector
 
 import backend.config as config
-from backend.ingestion.utils import text_to_pdf
 
 _gemini_client = genai.Client(api_key=config.GEMINI_API_KEY)
 
@@ -230,33 +229,8 @@ def chunk_video(filepath: str) -> list[dict]:
         )
         chunk_index += 1
 
-        # Step 5b: Chunk B — visual summary PDF (skip if no summary)
-        if visual_summary_text:
-            try:
-                pdf_bytes = text_to_pdf(visual_summary_text)
-            except Exception as exc:
-                logger.warning(
-                    f"chunk_video: PDF render failed for scene {scene_index} "
-                    f"in {filename}: {exc} — skipping Chunk B"
-                )
-                continue
-
-            chunks.append(
-                {
-                    "type": "document",
-                    "pdf_bytes": pdf_bytes,
-                    "text": visual_summary_text,
-                    "source": filepath,
-                    "page": 0,
-                    "chunk_index": chunk_index,
-                    "modality": "video_summary",
-                    "parent_scene_id": parent_scene_id,
-                    "start_time_seconds": start_s,
-                    "end_time_seconds": end_s,
-                    "scene_index": scene_index,
-                }
-            )
-            chunk_index += 1
+        # Step 5b: Chunk B — visual summary text (BM25 only, not vector DB)
+        # TODO: append visual_summary_text to BM25 index once bm25_index is implemented
 
     logger.info(
         f"chunk_video: produced {len(chunks)} chunks from {filename}"

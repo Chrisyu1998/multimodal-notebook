@@ -37,7 +37,7 @@ async def query(request: QueryRequest) -> QueryResponse:
         raise HTTPException(status_code=502, detail="Failed to embed question") from exc
 
     try:
-        chunks = vectorstore.search(query_embedding, top_k=5)
+        chunks = vectorstore.search_balanced(query_embedding)[:5]
     except Exception as exc:
         logger.error(f"Vector search failed: {exc}")
         raise HTTPException(status_code=502, detail="Vector search failed") from exc
