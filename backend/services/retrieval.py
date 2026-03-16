@@ -302,48 +302,59 @@ def hybrid_search(query: str, top_k: int = 20, use_hyde: bool = True) -> list[di
         f"RRF merged {len(bm25_results)} BM25 + {len(vector_results)} vector "
         f"→ {len(merged)} unique chunks (top_k={top_k})"
     )
+    for i, r in enumerate(merged):
+        logger.debug(
+            f"  RRF[{i + 1}] score={r.get('score', 0):.4f} "
+            f"bm25_rank={r.get('_bm25_rank', '-')} vector_rank={r.get('_vector_rank', '-')} "
+            f"source={r.get('source', '?')} page={r.get('page', '?')} "
+            f"| {r.get('text', '')[:120]!r}"
+        )
 
     return merged
 
 
 def rerank(query: str, chunks: list[dict], top_k: int = 5) -> list[dict]:
-    """Score candidate chunks against the query with Gemini Flash, keep top_k.
+    """Score all candidate chunks in a single Gemini Flash call, keep top_k.
 
-    Sends a single structured prompt asking Gemini to rate each chunk 0-10 for
-    relevance.  Returns the top_k highest-scoring chunks sorted by Gemini's score.
+    Sends one prompt containing all chunks so the model scores them relative to
+    each other — consistent calibration across the full candidate set.  Falls
+    back to the existing RRF order if the API call or JSON parsing fails.
 
-    Falls back to returning the first top_k chunks (already RRF-sorted) if the
-    API call fails, so the pipeline never hard-crashes during reranking.
+    Prompt asks for ONLY a JSON array:
+        [{"id": 1, "score": 0.95}, {"id": 2, "score": 0.42}, ...]
+    where id is 1-indexed and score is 0.0–1.0 (1.0 = perfectly relevant).
 
     Args:
         query:   The original user question.
         chunks:  Candidate chunks from hybrid_search(), up to 20.
-        top_k:   How many chunks to keep (default 5 — fed to the LLM context).
+        top_k:   How many chunks to keep (default 5, fed to generation).
 
     Returns:
-        Up to top_k chunk dicts sorted by Gemini reranker score descending.
-        Each dict gains a 'rerank_score' field (0-10 float).
+        Up to top_k chunk dicts sorted by rerank_score descending.
+        Each dict gains a 'rerank_score' field (float, 0.0–1.0).
     """
     if not chunks:
         return []
-
     if len(chunks) <= top_k:
-        # Not worth a Gemini call if we already have ≤ top_k candidates
+        for c in chunks[:top_k]:
+            c["rerank_score"] = c.get("score", 0.0)
         return chunks[:top_k]
 
-    # Build a numbered list of chunk previews — keep it short to stay within the
-    # model's optimal input range and control cost.
-    chunk_list = "\n\n".join(
+    # Each passage is truncated to 400 chars — enough signal for relevance
+    # scoring while keeping the prompt well within Flash's context window.
+    passages = "\n\n".join(
         f"[{i + 1}] {c['text'][:400]}" for i, c in enumerate(chunks)
     )
-
     prompt = (
-        "You are a relevance reranker.  For each numbered passage below, "
-        "output a JSON array where each element is an object with 'id' (1-indexed "
-        "integer) and 'score' (0-10 float, 10 = perfectly relevant).  "
-        "Output ONLY the JSON array — no explanation, no markdown fences.\n\n"
+        "You are a relevance reranker for a retrieval-augmented generation system.\n\n"
+        "Score each passage below for how relevant it is to answering the query.\n\n"
+        "Respond with ONLY a JSON array — no explanation, no markdown fences:\n"
+        '[{"id": <1-indexed int>, "score": <float 0.0–1.0>}, ...]\n\n'
+        "Where 1.0 = directly and completely answers the query,\n"
+        "      0.5 = partially relevant,\n"
+        "      0.0 = completely unrelated.\n\n"
         f"Query: {query}\n\n"
-        f"Passages:\n{chunk_list}"
+        f"Passages:\n{passages}"
     )
 
     try:
@@ -353,40 +364,33 @@ def rerank(query: str, chunks: list[dict], top_k: int = 5) -> list[dict]:
             config=types.GenerateContentConfig(temperature=0.0),
         )
         raw = response.text.strip()
-        # Strip markdown fences if the model wraps in ```json … ```
+        # Strip markdown fences if the model wraps the array in ```json … ```
         if raw.startswith("```"):
             raw = raw.split("```")[1]
             if raw.startswith("json"):
                 raw = raw[4:]
         scores: list[dict] = json.loads(raw)
-
-        # Map 1-indexed id → score
         id_to_score: dict[int, float] = {
-            int(item["id"]): float(item["score"])
-            for item in scores
+            int(item["id"]): float(item["score"]) for item in scores
         }
     except Exception as exc:
-        logger.warning(f"Reranker API call failed ({exc}) — using RRF order as fallback.")
-        for chunk in chunks[:top_k]:
-            chunk["rerank_score"] = chunk.get("score", 0.0)
+        logger.warning(f"Reranker failed ({exc}) — falling back to RRF order.")
+        for c in chunks[:top_k]:
+            c["rerank_score"] = c.get("score", 0.0)
         return chunks[:top_k]
 
-    # Attach Gemini scores to chunk dicts
     for i, chunk in enumerate(chunks):
         chunk["rerank_score"] = id_to_score.get(i + 1, 0.0)
 
-    # Sort by Gemini score, descending
-    reranked = sorted(chunks, key=lambda c: c["rerank_score"], reverse=True)
-
+    ranked = sorted(chunks, key=lambda c: c["rerank_score"], reverse=True)
     logger.info(
-        f"Reranker kept top {top_k}/{len(chunks)} chunks — "
-        f"scores: {[round(c['rerank_score'], 2) for c in reranked[:top_k]]}"
+        f"rerank: top {top_k}/{len(chunks)} scores: "
+        f"{[round(c['rerank_score'], 3) for c in ranked[:top_k]]}"
     )
-    for i, c in enumerate(reranked[:top_k]):
+    for i, c in enumerate(ranked[:top_k]):
         logger.debug(
-            f"  Reranked[{i+1}] rerank_score={c['rerank_score']:.2f} rrf_score={c.get('score', 0):.4f} "
-            f"source={c.get('source', '?')} page={c.get('page', '?')} "
-            f"| {c.get('text', '')[:120]!r}"
+            f"  [{i + 1}] rerank={c['rerank_score']:.3f} rrf={c.get('score', 0):.4f} "
+            f"src={c.get('source', '?')} pg={c.get('page', '?')} "
+            f"| {c['text'][:100]!r}"
         )
-
-    return reranked[:top_k]
+    return ranked[:top_k]

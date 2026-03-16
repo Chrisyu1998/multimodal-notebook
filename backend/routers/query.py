@@ -6,7 +6,7 @@ and returns a grounded answer from Gemini 2.5 Flash.
 Pipeline order:
   1. Guard: reject if no documents are indexed yet
   2. hybrid_search — HyDE + BM25 + vector + RRF fusion → top 20 chunks
-  3. TODO: rerank — Gemini Flash scores top 20 → keeps top 5
+  3. rerank        — one Gemini Flash call scores all 20 chunks → top 5
   4. Gemini 2.5 Flash generates answer (grounded, Chain-of-Thought prompt)
 """
 
@@ -19,7 +19,7 @@ from backend.models.schemas import QueryRequest, QueryResponse, SourceReference
 from backend.services import generation, vectorstore
 from backend.services.embeddings import EmbeddingBatchError
 from backend.services.generation import GenerationError
-from backend.services.retrieval import hybrid_search
+from backend.services.retrieval import hybrid_search, rerank
 from backend.services.vectorstore import VectorStoreUnavailableError
 
 router = APIRouter()
@@ -69,9 +69,11 @@ async def query(request: QueryRequest) -> QueryResponse:
             model=config.GENERATION_MODEL,
         )
 
-    # ---- 3. Generate answer ----
+    # ---- 3. Rerank: one Gemini Flash call scores all 20 chunks, keep top 5 ----
+    reranked_chunks = rerank(request.question, chunks, top_k=config.RERANK_TOP_K)
+
     try:
-        result = generation.generate_answer(request.question, chunks)
+        result = generation.generate_answer(request.question, reranked_chunks)
     except GenerationError as exc:
         logger.error(f"Generation failed: {exc}")
         raise HTTPException(
