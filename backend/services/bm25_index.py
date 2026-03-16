@@ -160,6 +160,7 @@ def search_bm25(query: str, top_k: int = 20) -> list[dict]:
                     "chunk_index": chunk.get("chunk_index", idx),
                     "page": chunk.get("page", 0),
                     "modality": chunk.get("modality", "text"),
+                    "gcs_uri": chunk.get("gcs_uri", ""),
                 },
             }
         )

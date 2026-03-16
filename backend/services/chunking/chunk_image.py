@@ -233,6 +233,7 @@ def chunk_image(filepath: str) -> list[dict]:
     global_chunk: dict = {
         "type": "image",
         "image_bytes": raw_bytes,
+        "mime_type": mime_type,
         "text": caption or f"Image: {filename}",
         "source": filepath,
         "page": 0,
@@ -304,6 +305,7 @@ def chunk_image(filepath: str) -> list[dict]:
                 {
                     "type": "image",
                     "image_bytes": crop_bytes,
+                    "mime_type": mime_type,
                     "text": f"Image: {filename} | Region: {region_type} | {label}",
                     "source": filepath,
                     "page": 0,

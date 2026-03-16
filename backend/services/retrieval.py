@@ -18,6 +18,10 @@ Design notes:
     contributions are summed before sorting.
   - BM25 results carry a nested 'metadata' dict; vector results are flat.
     _normalize() collapses both into the same shape so RRF can treat them uniformly.
+  - Reranker sends a single multimodal Gemini request so all candidates are scored
+    relative to each other.  Image/audio/video chunks pass their actual media bytes
+    (or a pre-extracted JPEG frame for video) instead of caption text, eliminating
+    the cross-modal embedding bias that would otherwise penalise non-text chunks.
 """
 
 import json
@@ -28,7 +32,7 @@ from google.genai import types
 from loguru import logger
 
 import backend.config as config
-from backend.services import bm25_index, embeddings, vectorstore
+from backend.services import bm25_index, embeddings, gcs, vectorstore
 
 _client = genai.Client(api_key=config.GEMINI_API_KEY)
 
@@ -51,15 +55,16 @@ def _normalize(result: dict) -> dict:
 
     BM25 results arrive as:
         {"text": ..., "score": ..., "metadata": {"source": ..., "chunk_index": ...,
-                                                  "page": ..., "modality": ...}}
+                                                  "page": ..., "modality": ...,
+                                                  "gcs_uri": ...}}
 
     Vector results arrive as:
         {"text": ..., "source": ..., "page": ..., "chunk_index": ...,
-         "type": ..., "score": ...}
+         "type": ..., "score": ..., "gcs_uri": ...}
 
     Output (canonical):
         {"text": ..., "source": ..., "page": ..., "chunk_index": ...,
-         "modality": ..., "orig_score": ...}
+         "modality": ..., "orig_score": ..., "gcs_uri": ...}
 
     'orig_score' preserves the raw BM25/cosine score for logging; the caller
     replaces 'score' with the RRF score before returning to callers upstream.
@@ -74,6 +79,7 @@ def _normalize(result: dict) -> dict:
             "chunk_index": meta.get("chunk_index", 0),
             "modality": meta.get("modality", "text"),
             "orig_score": result.get("score", 0.0),
+            "gcs_uri": meta.get("gcs_uri", ""),
         }
     else:
         # Vector shape
@@ -84,6 +90,7 @@ def _normalize(result: dict) -> dict:
             "chunk_index": result.get("chunk_index", 0),
             "modality": result.get("type", result.get("modality", "")),
             "orig_score": result.get("score", 0.0),
+            "gcs_uri": result.get("gcs_uri", ""),
         }
 
 
@@ -119,18 +126,15 @@ def reciprocal_rank_fusion(
     Returns:
         Deduplicated list sorted by descending RRF score, capped at top_k.
         Each dict has keys: text, source, page, chunk_index, modality, score
-        (the RRF score), orig_bm25_rank, orig_vector_rank (for debugging).
+        (the RRF score), gcs_uri, orig_bm25_rank, orig_vector_rank (for debugging).
     """
     # ---- Step 1: Normalise both lists to a common dict shape ----
-    # This decouples RRF logic from the quirky shapes of the upstream services.
     bm25_norm   = [_normalize(r) for r in bm25_results]
     vector_norm = [_normalize(r) for r in vector_results]
 
     # ---- Step 2: Build a registry keyed by exact chunk text ----
     # registry maps  text → {"meta": canonical_dict, "rrf_score": float,
     #                         "bm25_rank": int|None, "vector_rank": int|None}
-    # We use text as the dedup key because it's the only field guaranteed to
-    # match across the two retrieval backends (IDs are not shared).
     registry: dict[str, dict[str, Any]] = {}
 
     # ---- Step 3: Accumulate BM25 rank contributions ----
@@ -147,14 +151,10 @@ def reciprocal_rank_fusion(
                 "vector_rank": None,
             }
 
-        registry[text]["rrf_score"] += contribution    # add this list's contribution
-        registry[text]["bm25_rank"] = rank             # record rank for debugging
+        registry[text]["rrf_score"] += contribution
+        registry[text]["bm25_rank"] = rank
 
     # ---- Step 4: Accumulate vector rank contributions ----
-    # Identical logic to Step 3 — if the text already exists in the registry
-    # (i.e. it appeared in the BM25 list too), the contribution is *added* to
-    # whatever BM25 already contributed.  That's the key insight of RRF: docs
-    # that rank well in multiple lists get a boost, not a replacement.
     for rank_0indexed, doc in enumerate(vector_norm):
         rank = rank_0indexed + 1
         contribution = 1.0 / (_RRF_K + rank)
@@ -188,7 +188,8 @@ def reciprocal_rank_fusion(
             "page":          meta["page"],
             "chunk_index":   meta["chunk_index"],
             "modality":      meta["modality"],
-            "score":         entry["rrf_score"],       # downstream uses 'score' uniformly
+            "score":         entry["rrf_score"],
+            "gcs_uri":       meta.get("gcs_uri", ""),
             # Debug fields — visible in logs but not returned to the UI
             "_bm25_rank":    entry["bm25_rank"],
             "_vector_rank":  entry["vector_rank"],
@@ -204,9 +205,6 @@ def hyde_expand(query: str) -> str:
     a 2-3 sentence passage as if it existed in the corpus.  The resulting text sits
     in *answer space* rather than *question space*, dramatically improving cosine
     similarity against real answer chunks.
-
-    The prompt instructs the model to match the style and vocabulary of a real source
-    document so the hypothetical embedding lands close to genuine corpus embeddings.
 
     Falls back to the original query on any API error so the pipeline never blocks.
     """
@@ -250,17 +248,13 @@ def hybrid_search(query: str, top_k: int = 20, use_hyde: bool = True) -> list[di
         query:     The user's original natural-language question.
         top_k:     Number of results to return (default 20, trimmed after RRF).
         use_hyde:  If True (default), expand the query via HyDE before embedding.
-                   Set to False to embed the raw query — useful for A/B comparison.
 
     Returns:
         Merged result list with keys: text, source, page, chunk_index,
-        modality, score (RRF score).
+        modality, score (RRF score), gcs_uri.
     """
     logger.info(f"hybrid_search top_k={top_k} use_hyde={use_hyde}: {query!r}")
 
-    # ---- HyDE: embed a hypothetical document rather than the bare question ----
-    # When use_hyde=False we skip the LLM call and embed the raw query directly.
-    # BM25 always receives the original query regardless of this flag.
     if use_hyde:
         hyde_text = hyde_expand(query)
     else:
@@ -268,9 +262,6 @@ def hybrid_search(query: str, top_k: int = 20, use_hyde: bool = True) -> list[di
         logger.debug("HyDE disabled — embedding raw query for vector search.")
     query_embedding = embeddings.embed_text(hyde_text)
 
-    # ---- BM25: keyword search on the original query ----
-    # BM25 uses the literal question because Porter-stemmed token overlap is
-    # what it optimises for; a hypothetical *answer* adds noise here.
     try:
         bm25_results = bm25_index.search_bm25(query, top_k=config.BM25_TOP_K)
         logger.debug(f"BM25 returned {len(bm25_results)} results")
@@ -282,11 +273,9 @@ def hybrid_search(query: str, top_k: int = 20, use_hyde: bool = True) -> list[di
                 f"| {r.get('text', '')[:120]!r}"
             )
     except RuntimeError as exc:
-        # Index not built yet (no uploads) — degrade gracefully to vector-only
         logger.warning(f"BM25 unavailable ({exc}) — using vector search only.")
         bm25_results = []
 
-    # ---- Vector: semantic search on the HyDE embedding ----
     vector_results = vectorstore.search(query_embedding, top_k=config.VECTOR_TOP_K)
     logger.debug(f"Vector search returned {len(vector_results)} results")
     for i, r in enumerate(vector_results):
@@ -296,7 +285,6 @@ def hybrid_search(query: str, top_k: int = 20, use_hyde: bool = True) -> list[di
             f"| {r.get('text', '')[:120]!r}"
         )
 
-    # ---- RRF: merge both ranked lists ----
     merged = reciprocal_rank_fusion(bm25_results, vector_results, top_k=top_k)
     logger.info(
         f"RRF merged {len(bm25_results)} BM25 + {len(vector_results)} vector "
@@ -313,16 +301,99 @@ def hybrid_search(query: str, top_k: int = 20, use_hyde: bool = True) -> list[di
     return merged
 
 
+def _build_rerank_parts(query: str, chunks: list[dict]) -> list[types.Part]:
+    """Build an interleaved multimodal content list for a single Gemini rerank call.
+
+    Each chunk gets its native representation:
+      - text / pdf / video_summary → plain text (400-char truncation).
+      - image_global / image_local → actual image bytes fetched from GCS.
+      - video_clip                 → the pre-extracted mid-point JPEG frame
+                                     from GCS plus the text summary as context.
+                                     Using a frame avoids downloading the full
+                                     MP4 clip at query time (~1000× smaller).
+      - audio_clip                 → the pre-sliced MP3 bytes from GCS.
+
+    If a GCS fetch fails for any chunk, that chunk falls back to its text
+    representation so the reranker always receives a complete candidate list.
+
+    All candidates are interleaved in one list of Parts so Gemini scores them
+    relative to each other — the same calibration benefit as the original
+    single-prompt design, extended to mixed modalities.
+    """
+    header = (
+        "You are a relevance reranker for a retrieval-augmented generation system.\n\n"
+        "Score each passage below for how relevant it is to answering the query.\n\n"
+        "Respond with ONLY a JSON array — no explanation, no markdown fences:\n"
+        '[{"id": <1-indexed int>, "score": <float 0.0–1.0>}, ...]\n\n'
+        "Where 1.0 = directly and completely answers the query,\n"
+        "      0.5 = partially relevant,\n"
+        "      0.0 = completely unrelated.\n\n"
+        f"Query: {query}\n\nPassages:\n"
+    )
+    # The Gemini SDK accepts a mixed list of strings and Part objects, so plain
+    # strings are used for text segments — no Part.from_text() wrapper needed.
+    parts: list = [header]
+
+    for i, chunk in enumerate(chunks):
+        modality: str = chunk.get("modality", "")
+        gcs_uri: str = chunk.get("gcs_uri", "")
+        label = f"[{i + 1}]"
+
+        if modality in ("image_global", "image_local") and gcs_uri:
+            try:
+                img_bytes = gcs.download_bytes(gcs_uri)
+                mime = "image/png" if gcs_uri.endswith(".png") else "image/jpeg"
+                parts.append(f"{label} ")
+                parts.append(types.Part.from_bytes(data=img_bytes, mime_type=mime))
+                continue
+            except Exception as exc:
+                logger.warning(
+                    f"rerank: GCS fetch failed for image chunk {i+1} "
+                    f"({gcs_uri}): {exc} — falling back to text"
+                )
+
+        elif modality == "video_clip" and gcs_uri:
+            try:
+                frame_bytes = gcs.download_bytes(gcs_uri)
+                # Include the text summary so the model has both visual and
+                # semantic context for the clip.
+                context = chunk.get("text", "")[:300]
+                parts.append(f"{label} [Video segment] Summary: {context}\nFrame: ")
+                parts.append(types.Part.from_bytes(data=frame_bytes, mime_type="image/jpeg"))
+                continue
+            except Exception as exc:
+                logger.warning(
+                    f"rerank: GCS fetch failed for video frame chunk {i+1} "
+                    f"({gcs_uri}): {exc} — falling back to text"
+                )
+
+        elif modality == "audio_clip" and gcs_uri:
+            try:
+                audio_bytes = gcs.download_bytes(gcs_uri)
+                parts.append(f"{label} [Audio clip] ")
+                parts.append(types.Part.from_bytes(data=audio_bytes, mime_type="audio/mp3"))
+                continue
+            except Exception as exc:
+                logger.warning(
+                    f"rerank: GCS fetch failed for audio chunk {i+1} "
+                    f"({gcs_uri}): {exc} — falling back to text"
+                )
+
+        # Fallback path: text (used for pdf/text chunks, video_summary chunks,
+        # and any media chunk whose GCS fetch failed above).
+        parts.append(f"{label} {chunk['text'][:400]}")
+
+    return parts
+
+
 def rerank(query: str, chunks: list[dict], top_k: int = 5) -> list[dict]:
-    """Score all candidate chunks in a single Gemini Flash call, keep top_k.
+    """Score all candidate chunks in a single multimodal Gemini Flash call, keep top_k.
 
-    Sends one prompt containing all chunks so the model scores them relative to
-    each other — consistent calibration across the full candidate set.  Falls
-    back to the existing RRF order if the API call or JSON parsing fails.
-
-    Prompt asks for ONLY a JSON array:
-        [{"id": 1, "score": 0.95}, {"id": 2, "score": 0.42}, ...]
-    where id is 1-indexed and score is 0.0–1.0 (1.0 = perfectly relevant).
+    Sends one request containing all chunks — text as plain text, images/audio
+    as their actual bytes, video clips as a pre-extracted mid-point JPEG frame —
+    so the model scores candidates relative to each other in a single calibrated
+    pass.  Falls back to the existing RRF order if the API call or JSON parsing
+    fails.
 
     Args:
         query:   The original user question.
@@ -340,27 +411,12 @@ def rerank(query: str, chunks: list[dict], top_k: int = 5) -> list[dict]:
             c["rerank_score"] = c.get("score", 0.0)
         return chunks[:top_k]
 
-    # Each passage is truncated to 400 chars — enough signal for relevance
-    # scoring while keeping the prompt well within Flash's context window.
-    passages = "\n\n".join(
-        f"[{i + 1}] {c['text'][:400]}" for i, c in enumerate(chunks)
-    )
-    prompt = (
-        "You are a relevance reranker for a retrieval-augmented generation system.\n\n"
-        "Score each passage below for how relevant it is to answering the query.\n\n"
-        "Respond with ONLY a JSON array — no explanation, no markdown fences:\n"
-        '[{"id": <1-indexed int>, "score": <float 0.0–1.0>}, ...]\n\n'
-        "Where 1.0 = directly and completely answers the query,\n"
-        "      0.5 = partially relevant,\n"
-        "      0.0 = completely unrelated.\n\n"
-        f"Query: {query}\n\n"
-        f"Passages:\n{passages}"
-    )
+    rerank_parts = _build_rerank_parts(query, chunks)
 
     try:
         response = _client.models.generate_content(
             model=config.RERANK_MODEL,
-            contents=prompt,
+            contents=rerank_parts,
             config=types.GenerateContentConfig(temperature=0.0),
         )
         raw = response.text.strip()

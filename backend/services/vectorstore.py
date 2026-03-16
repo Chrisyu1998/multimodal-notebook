@@ -107,6 +107,7 @@ def add_chunks(chunks: list[dict]) -> None:
                 "chunk_index": c["chunk_index"],
                 "modality": c.get("modality", ""),
                 "type": c.get("type", ""),
+                "gcs_uri": c.get("gcs_uri", ""),
             }
             for c in new_chunks
         ],
@@ -142,6 +143,7 @@ def search(query_embedding: list[float], top_k: int = config.VECTOR_TOP_K) -> li
                 "page": meta["page"],
                 "chunk_index": meta["chunk_index"],
                 "type": meta.get("type", ""),
+                "gcs_uri": meta.get("gcs_uri", ""),
                 # ChromaDB returns L2-normalised cosine distance in [0, 2];
                 # convert to similarity: score = 1 - distance
                 "score": 1.0 - dist,

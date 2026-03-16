@@ -22,6 +22,18 @@ from backend.main import app
 
 client = TestClient(app)
 
+
+# ---------------------------------------------------------------------------
+# Module-wide GCS mock — unit tests must never hit real GCS
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def _mock_gcs():
+    """Patch gcs.upload_bytes so no test ever touches real GCS storage."""
+    with patch("backend.routers.upload.gcs.upload_bytes", return_value="gs://test-bucket/test"):
+        yield
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
