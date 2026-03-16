@@ -82,13 +82,14 @@ def _normalize(result: dict) -> dict:
             "gcs_uri": meta.get("gcs_uri", ""),
         }
     else:
-        # Vector shape
+        # Vector shape — prefer specific modality (e.g. "image_global") over
+        # the broad type field (e.g. "image") so generation can route correctly.
         return {
             "text": result.get("text", ""),
             "source": result.get("source", ""),
             "page": result.get("page", 0),
             "chunk_index": result.get("chunk_index", 0),
-            "modality": result.get("type", result.get("modality", "")),
+            "modality": result.get("modality", "") or result.get("type", ""),
             "orig_score": result.get("score", 0.0),
             "gcs_uri": result.get("gcs_uri", ""),
         }

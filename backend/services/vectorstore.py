@@ -143,6 +143,7 @@ def search(query_embedding: list[float], top_k: int = config.VECTOR_TOP_K) -> li
                 "page": meta["page"],
                 "chunk_index": meta["chunk_index"],
                 "type": meta.get("type", ""),
+                "modality": meta.get("modality", ""),
                 "gcs_uri": meta.get("gcs_uri", ""),
                 # ChromaDB returns L2-normalised cosine distance in [0, 2];
                 # convert to similarity: score = 1 - distance

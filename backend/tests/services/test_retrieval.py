@@ -83,6 +83,14 @@ class TestNormalize:
         n = _normalize(r)
         assert n["modality"] == "image"
 
+    def test_vector_specific_modality_takes_priority_over_type(self):
+        # When search() returns both type and modality, the specific modality wins.
+        r = _vector_result("text", source="x.pdf")
+        r["type"] = "image"
+        r["modality"] = "image_global"
+        n = _normalize(r)
+        assert n["modality"] == "image_global"
+
     def test_missing_fields_get_defaults(self):
         n = _normalize({"text": "bare"})
         assert n["source"] == ""

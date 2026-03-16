@@ -18,7 +18,11 @@ import backend.config as config
 from backend.models.schemas import QueryRequest, QueryResponse, SourceReference
 from backend.services import generation, vectorstore
 from backend.services.embeddings import EmbeddingBatchError
-from backend.services.generation import GenerationError
+from backend.services.generation import (
+    GenerationError,
+    GenerationConfigError,
+    GenerationRetryableError,
+)
 from backend.services.retrieval import hybrid_search, rerank
 from backend.services.vectorstore import VectorStoreUnavailableError
 
@@ -74,6 +78,18 @@ async def query(request: QueryRequest) -> QueryResponse:
 
     try:
         result = generation.generate_answer(request.question, reranked_chunks)
+    except GenerationConfigError as exc:
+        logger.error(f"Generation misconfiguration: {exc}")
+        raise HTTPException(
+            status_code=500,
+            detail="Generation service misconfigured. Contact the administrator.",
+        ) from exc
+    except GenerationRetryableError as exc:
+        logger.error(f"Generation transient failure: {exc}")
+        raise HTTPException(
+            status_code=503,
+            detail="Generation service unavailable. Please try again.",
+        ) from exc
     except GenerationError as exc:
         logger.error(f"Generation failed: {exc}")
         raise HTTPException(
@@ -85,11 +101,15 @@ async def query(request: QueryRequest) -> QueryResponse:
         raise HTTPException(status_code=502, detail="Answer generation failed.") from exc
 
     elapsed_ms = (time.monotonic() - start) * 1000
-    logger.info(f"Query completed in {elapsed_ms:.1f}ms — {result['chunks_used']} chunks used")
+    logger.info(
+        f"Query completed in {elapsed_ms:.1f}ms — {result['chunks_used']} chunks used"
+        + (f", {result['media_chunks_degraded']} media chunk(s) degraded" if result["media_chunks_degraded"] else "")
+    )
 
     return QueryResponse(
         answer=result["answer"],
         sources=[SourceReference(**s) for s in result["sources"]],
         chunks_used=result["chunks_used"],
         model=result["model"],
+        media_chunks_degraded=result["media_chunks_degraded"],
     )

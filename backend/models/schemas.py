@@ -41,6 +41,7 @@ class SourceReference(BaseModel):
     filename: str
     page: int
     score: float
+    snippet: str = ""
 
 
 class QueryResponse(BaseModel):
@@ -49,6 +50,7 @@ class QueryResponse(BaseModel):
     sources: list[SourceReference]
     chunks_used: int
     model: str
+    media_chunks_degraded: int = 0
 
 
 # ---------------------------------------------------------------------------

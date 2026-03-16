@@ -10,13 +10,17 @@ Covers:
   - Service failure: hybrid_search raises EmbeddingBatchError → 503
   - Service failure: hybrid_search raises VectorStoreUnavailableError → 503
   - Service failure: hybrid_search raises generic Exception → 502
-  - Service failure: generate_answer raises GenerationError → 503
+  - Service failure: generate_answer raises GenerationRetryableError → 503
+  - Service failure: generate_answer raises GenerationConfigError → 500
+  - Service failure: generate_answer raises GenerationError (base) → 503
   - Service failure: generate_answer raises generic Exception → 502
   - Input validation: missing question field → 422
   - Input validation: empty string question → passes (model decides)
   - Response shape: all required fields present and correctly typed
   - chunks_used matches sources list length
   - model field reflects config.GENERATION_MODEL
+  - media_chunks_degraded field present and defaults to 0
+  - media_chunks_degraded non-zero when GCS fetch failures occur
 """
 
 import os
@@ -31,7 +35,11 @@ os.environ.setdefault("GCS_BUCKET_NAME", "test-bucket")
 from backend.main import app
 import backend.config as config
 from backend.services.embeddings import EmbeddingBatchError
-from backend.services.generation import GenerationError
+from backend.services.generation import (
+    GenerationError,
+    GenerationConfigError,
+    GenerationRetryableError,
+)
 from backend.services.vectorstore import VectorStoreUnavailableError
 
 client = TestClient(app)
@@ -60,11 +68,12 @@ _FAKE_CHUNKS = [
 _FAKE_GENERATION_RESULT = {
     "answer": "Paris is the capital of France.",
     "sources": [
-        {"filename": "geography.pdf", "page": 1, "score": 0.95},
-        {"filename": "geography.pdf", "page": 2, "score": 0.88},
+        {"filename": "geography.pdf", "page": 1, "score": 0.95, "snippet": "Paris is the capital"},
+        {"filename": "geography.pdf", "page": 2, "score": 0.88, "snippet": "France is in Western"},
     ],
     "chunks_used": 2,
     "model": config.GENERATION_MODEL,
+    "media_chunks_degraded": 0,
 }
 
 
@@ -89,17 +98,18 @@ class TestQueryHappyPath:
         with patch("backend.routers.query.hybrid_search", return_value=_FAKE_CHUNKS), \
              patch("backend.routers.query.generation.generate_answer", return_value=_FAKE_GENERATION_RESULT):
             resp = client.post("/query/", json={"question": "What is the capital of France?"})
-        assert set(resp.json().keys()) == {"answer", "sources", "chunks_used", "model"}
+        assert set(resp.json().keys()) == {"answer", "sources", "chunks_used", "model", "media_chunks_degraded"}
 
     def test_sources_list_shape(self):
         with patch("backend.routers.query.hybrid_search", return_value=_FAKE_CHUNKS), \
              patch("backend.routers.query.generation.generate_answer", return_value=_FAKE_GENERATION_RESULT):
             resp = client.post("/query/", json={"question": "What is the capital of France?"})
         for s in resp.json()["sources"]:
-            assert set(s.keys()) == {"filename", "page", "score"}
+            assert set(s.keys()) == {"filename", "page", "score", "snippet"}
             assert isinstance(s["filename"], str)
             assert isinstance(s["page"], int)
             assert isinstance(s["score"], float)
+            assert isinstance(s["snippet"], str)
 
     def test_chunks_used_matches_sources_count(self):
         with patch("backend.routers.query.hybrid_search", return_value=_FAKE_CHUNKS), \
@@ -113,6 +123,19 @@ class TestQueryHappyPath:
              patch("backend.routers.query.generation.generate_answer", return_value=_FAKE_GENERATION_RESULT):
             resp = client.post("/query/", json={"question": "What is the capital of France?"})
         assert resp.json()["model"] == config.GENERATION_MODEL
+
+    def test_media_chunks_degraded_defaults_to_zero(self):
+        with patch("backend.routers.query.hybrid_search", return_value=_FAKE_CHUNKS), \
+             patch("backend.routers.query.generation.generate_answer", return_value=_FAKE_GENERATION_RESULT):
+            resp = client.post("/query/", json={"question": "What is the capital of France?"})
+        assert resp.json()["media_chunks_degraded"] == 0
+
+    def test_media_chunks_degraded_nonzero_when_gcs_failures(self):
+        degraded_result = {**_FAKE_GENERATION_RESULT, "media_chunks_degraded": 2}
+        with patch("backend.routers.query.hybrid_search", return_value=_FAKE_CHUNKS), \
+             patch("backend.routers.query.generation.generate_answer", return_value=degraded_result):
+            resp = client.post("/query/", json={"question": "What is the capital of France?"})
+        assert resp.json()["media_chunks_degraded"] == 2
 
     def test_hybrid_search_called_with_question(self):
         mock_search = MagicMock(return_value=_FAKE_CHUNKS)
@@ -187,7 +210,21 @@ class TestQueryServiceFailures:
         assert resp.status_code == 502
         assert "retrieval" in resp.json()["detail"].lower()
 
-    def test_503_when_generation_raises_generation_error(self):
+    def test_503_when_generation_raises_retryable_error(self):
+        with patch("backend.routers.query.hybrid_search", return_value=_FAKE_CHUNKS), \
+             patch("backend.routers.query.generation.generate_answer",
+                   side_effect=GenerationRetryableError("rate limit exceeded")):
+            resp = client.post("/query/", json={"question": "test"})
+        assert resp.status_code == 503
+
+    def test_500_when_generation_raises_config_error(self):
+        with patch("backend.routers.query.hybrid_search", return_value=_FAKE_CHUNKS), \
+             patch("backend.routers.query.generation.generate_answer",
+                   side_effect=GenerationConfigError("invalid api key")):
+            resp = client.post("/query/", json={"question": "test"})
+        assert resp.status_code == 500
+
+    def test_503_when_generation_raises_base_generation_error(self):
         with patch("backend.routers.query.hybrid_search", return_value=_FAKE_CHUNKS), \
              patch("backend.routers.query.generation.generate_answer",
                    side_effect=GenerationError("LLM quota exceeded")):
@@ -266,9 +303,10 @@ class TestQuerySingleChunk:
         single_chunk = [_FAKE_CHUNKS[0]]
         single_result = {
             "answer": "Paris.",
-            "sources": [{"filename": "geography.pdf", "page": 1, "score": 0.95}],
+            "sources": [{"filename": "geography.pdf", "page": 1, "score": 0.95, "snippet": "Paris is the capital"}],
             "chunks_used": 1,
             "model": config.GENERATION_MODEL,
+            "media_chunks_degraded": 0,
         }
         with patch("backend.routers.query.hybrid_search", return_value=single_chunk), \
              patch("backend.routers.query.generation.generate_answer", return_value=single_result):

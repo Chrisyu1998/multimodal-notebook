@@ -207,7 +207,7 @@ def test_search_returns_correct_fields(store):
 
     assert len(results) == 1
     r = results[0]
-    assert set(r.keys()) == {"text", "source", "page", "chunk_index", "score", "type", "gcs_uri"}
+    assert set(r.keys()) == {"text", "source", "page", "chunk_index", "score", "type", "modality", "gcs_uri"}
 
 
 def test_search_score_is_near_one_for_identical_vector(store):
