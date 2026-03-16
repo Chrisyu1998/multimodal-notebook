@@ -17,7 +17,7 @@ from backend.services import chunking, embeddings, vectorstore
 from backend.services.embeddings import EmbeddingBatchError
 from backend.services.vectorstore import VectorStoreUnavailableError
 
-# TODO: from backend.services import bm25_index (not yet implemented)
+from backend.services import bm25_index
 
 router = APIRouter()
 
@@ -137,7 +137,8 @@ async def upload_file(file: UploadFile = File(...)) -> UploadResponse:
         logger.error(f"Unexpected vectorstore error for {file.filename!r}: {exc}")
         raise HTTPException(status_code=503, detail="Vector store unavailable.") from exc
 
-    # TODO (Week 1): bm25_index.build_index(chunks)
+    # ---- 8. BM25 index ----
+    bm25_index.build_index(chunks)
 
     return UploadResponse(
         file_id=file_id,

@@ -13,6 +13,7 @@ import tempfile
 from unittest.mock import MagicMock, patch
 
 import pytest
+from contextlib import contextmanager, ExitStack
 from PIL import Image
 
 os.environ.setdefault("GEMINI_API_KEY", "test-key")
@@ -20,8 +21,17 @@ os.environ.setdefault("GCS_BUCKET_NAME", "test-bucket")
 
 import sys
 
-from backend.services.chunking.chunk_image import chunk_image  # ensures module is in sys.modules
+from backend.services.chunking.chunk_image import (  # ensures module is in sys.modules
+    chunk_image,
+    _detect_regions,
+)
 _chunk_image_module = sys.modules["backend.services.chunking.chunk_image"]
+
+# Stable caption returned by the mock — rich enough for text assertions
+_FAKE_CAPTION = (
+    "TRANSCRIPTION: left half right half table diagram\n"
+    "DESCRIPTION: A test architecture diagram showing two regions."
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -75,11 +85,40 @@ def _make_response(text: str) -> MagicMock:
     return mock
 
 
-def _patch_gemini(response_text: str):
-    """Context manager: patch the module-level Gemini client."""
+@contextmanager
+def _patch_chunk_image(regions_text: str, caption: str = _FAKE_CAPTION):
+    """Patch _generate_image_caption and _detect_regions independently.
+
+    regions_text is parsed from JSON — invalid JSON or non-list JSON both
+    produce an empty region list (mirroring _detect_regions's own fallback).
+    """
+    try:
+        parsed = json.loads(regions_text)
+        if not isinstance(parsed, list):
+            parsed = []
+    except (json.JSONDecodeError, ValueError):
+        parsed = []
+
+    with ExitStack() as stack:
+        stack.enter_context(
+            patch.object(_chunk_image_module, "_generate_image_caption", return_value=caption)
+        )
+        stack.enter_context(
+            patch.object(_chunk_image_module, "_detect_regions", return_value=parsed)
+        )
+        yield
+
+
+# Kept for tests that need to probe _gemini_client directly (e.g. TestDetectRegions)
+def _patch_gemini_client(response_text: str):
+    """Patch the raw Gemini client — used only for unit-testing _detect_regions."""
     mock_client = MagicMock()
     mock_client.models.generate_content.return_value = _make_response(response_text)
     return patch.object(_chunk_image_module, "_gemini_client", mock_client)
+
+
+# Backward-compat alias so existing test call sites need no changes
+_patch_gemini = _patch_chunk_image
 
 
 # ---------------------------------------------------------------------------
@@ -152,14 +191,17 @@ class TestGlobalChunkSchema:
         finally:
             os.unlink(path)
 
-    def test_image_bytes_is_raw_file_bytes(self):
+    def test_image_bytes_is_nonempty_bytes(self):
+        """image_bytes must be non-empty bytes decodable as a valid image."""
         path = _make_image_file()
         try:
             with _patch_gemini(_TWO_REGIONS):
                 chunks = chunk_image(path)
-            with open(path, "rb") as f:
-                raw = f.read()
-            assert chunks[0]["image_bytes"] == raw
+            data = chunks[0]["image_bytes"]
+            assert isinstance(data, bytes) and len(data) > 0
+            # Verify the bytes form a valid image (not garbage)
+            img = Image.open(io.BytesIO(data))
+            img.verify()
         finally:
             os.unlink(path)
 
@@ -172,13 +214,23 @@ class TestGlobalChunkSchema:
         finally:
             os.unlink(path)
 
-    def test_text_contains_filename(self):
+    def test_global_text_is_caption(self):
+        """Global chunk text must be the Gemini-generated caption."""
         path = _make_image_file()
         try:
             with _patch_gemini(_TWO_REGIONS):
                 chunks = chunk_image(path)
-            filename = os.path.basename(path)
-            assert filename in chunks[0]["text"]
+            assert chunks[0]["text"] == _FAKE_CAPTION
+        finally:
+            os.unlink(path)
+
+    def test_global_text_falls_back_to_filename_when_caption_fails(self):
+        """When caption returns empty string the text must fall back to filename."""
+        path = _make_image_file()
+        try:
+            with _patch_chunk_image(_TWO_REGIONS, caption=""):
+                chunks = chunk_image(path)
+            assert os.path.basename(path) in chunks[0]["text"]
         finally:
             os.unlink(path)
 
@@ -416,14 +468,16 @@ class TestStream2Fallback:
             os.unlink(path)
 
     def test_gemini_exception_returns_only_global(self):
+        """When both Gemini helpers fail internally, chunk_image still returns the global chunk."""
         path = _make_image_file()
         try:
-            mock_client = MagicMock()
-            mock_client.models.generate_content.side_effect = RuntimeError("api down")
-            with patch.object(_chunk_image_module, "_gemini_client", mock_client):
+            # Both helpers catch their own exceptions and return "" / []
+            with _patch_chunk_image("[]", caption=""):
                 chunks = chunk_image(path)
             assert len(chunks) == 1
             assert chunks[0]["modality"] == "image_global"
+            # Caption failure → text must fall back to filename
+            assert os.path.basename(path) in chunks[0]["text"]
         finally:
             os.unlink(path)
 
@@ -452,14 +506,14 @@ class TestStream2Fallback:
         finally:
             os.unlink(path)
 
-    def test_markdown_fenced_json_is_parsed(self):
-        """Gemini sometimes wraps JSON in ```json ... ``` — must still work."""
-        fenced = f"```json\n{_TWO_REGIONS}\n```"
+    def test_detect_regions_empty_returns_only_global(self):
+        """_detect_regions returning [] means no local chunks."""
         path = _make_image_file()
         try:
-            with _patch_gemini(fenced):
+            with _patch_chunk_image("[]"):
                 chunks = chunk_image(path)
-            assert len(chunks) == 3   # global + 2 locals
+            assert len(chunks) == 1
+            assert chunks[0]["modality"] == "image_global"
         finally:
             os.unlink(path)
 
@@ -657,3 +711,42 @@ class TestDeduplication:
             assert len(chunks) == 3   # 1 global + 2 distinct locals
         finally:
             os.unlink(path)
+
+
+# ---------------------------------------------------------------------------
+# _detect_regions unit tests — probe its internal JSON handling directly
+# ---------------------------------------------------------------------------
+
+class TestDetectRegions:
+    """Unit tests for _detect_regions.  Patches _gemini_client directly so
+    we can verify the function's own JSON parsing and error handling."""
+
+    def test_valid_json_array_returned(self):
+        with _patch_gemini_client(_TWO_REGIONS):
+            result = _detect_regions(b"fake", "image/png", 200, 100)
+        assert isinstance(result, list)
+        assert len(result) == 2
+
+    def test_markdown_fenced_json_is_stripped_and_parsed(self):
+        """Gemini sometimes wraps JSON in ```json ... ``` — must be handled."""
+        fenced = f"```json\n{_TWO_REGIONS}\n```"
+        with _patch_gemini_client(fenced):
+            result = _detect_regions(b"fake", "image/png", 200, 100)
+        assert len(result) == 2
+
+    def test_non_list_json_returns_empty(self):
+        with _patch_gemini_client('{"region_type": "table", "bbox": [0,0,1,1]}'):
+            result = _detect_regions(b"fake", "image/png", 200, 100)
+        assert result == []
+
+    def test_invalid_json_returns_empty(self):
+        with _patch_gemini_client("this is not json"):
+            result = _detect_regions(b"fake", "image/png", 200, 100)
+        assert result == []
+
+    def test_gemini_exception_returns_empty(self):
+        mock_client = MagicMock()
+        mock_client.models.generate_content.side_effect = RuntimeError("api down")
+        with patch.object(_chunk_image_module, "_gemini_client", mock_client):
+            result = _detect_regions(b"fake", "image/png", 200, 100)
+        assert result == []

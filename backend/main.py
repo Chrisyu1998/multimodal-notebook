@@ -11,6 +11,7 @@ from loguru import logger
 
 import backend.config as config
 from backend.routers import upload, query
+from backend.services import bm25_index
 
 # TODO (Week 3): from backend.routers import eval
 
@@ -23,9 +24,7 @@ from backend.routers import upload, query
 async def lifespan(app: FastAPI):
     # ---- startup ----
     _log_config()
-
-    # TODO: from backend.services import bm25_index
-    # TODO: bm25_index.load_index()   — restore persisted BM25 index
+    bm25_index.load_index()
 
     # TODO: ping ChromaDB to verify the persistence dir is accessible
     #   import chromadb

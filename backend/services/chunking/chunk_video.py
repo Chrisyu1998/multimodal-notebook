@@ -229,8 +229,25 @@ def chunk_video(filepath: str) -> list[dict]:
         )
         chunk_index += 1
 
-        # Step 5b: Chunk B — visual summary text (BM25 only, not vector DB)
-        # TODO: append visual_summary_text to BM25 index once bm25_index is implemented
+        # Step 5b: Chunk B — visual summary as a text-only document chunk.
+        # Gets text-embedded (for vector search) AND BM25-indexed.
+        # Only emitted when Gemini returned a non-empty summary.
+        if visual_summary_text:
+            chunks.append(
+                {
+                    "type": "document",
+                    "text": visual_summary_text,
+                    "source": filepath,
+                    "page": 0,
+                    "chunk_index": chunk_index,
+                    "modality": "video_summary",
+                    "parent_scene_id": parent_scene_id,
+                    "start_time_seconds": start_s,
+                    "end_time_seconds": end_s,
+                    "scene_index": scene_index,
+                }
+            )
+            chunk_index += 1
 
     logger.info(
         f"chunk_video: produced {len(chunks)} chunks from {filename}"

@@ -31,6 +31,19 @@ import backend.config as config
 
 client = TestClient(app)
 
+
+# ---------------------------------------------------------------------------
+# Autouse fixture: suppress the "no documents indexed" guard so tests can
+# reach the service layer without needing a real ChromaDB collection.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def _mock_collection_not_empty(monkeypatch):
+    """Patch vectorstore.collection_is_empty → False for every test in this module."""
+    with patch("backend.routers.query.vectorstore.collection_is_empty", return_value=False):
+        yield
+
+
 # ---------------------------------------------------------------------------
 # Shared fixtures / constants
 # ---------------------------------------------------------------------------

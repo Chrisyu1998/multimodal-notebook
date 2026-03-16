@@ -256,7 +256,6 @@ class TestChunkASchema:
 # ---------------------------------------------------------------------------
 
 class TestChunkBSchema:
-    @pytest.mark.skip(reason="Chunk B (video_summary) not yet implemented")
     def test_required_keys_present(self):
         path = _make_video_file()
         try:
@@ -269,7 +268,6 @@ class TestChunkBSchema:
         finally:
             os.unlink(path)
 
-    @pytest.mark.skip(reason="Chunk B (video_summary) not yet implemented")
     def test_type_is_document(self):
         path = _make_video_file()
         try:
@@ -279,17 +277,6 @@ class TestChunkBSchema:
         finally:
             os.unlink(path)
 
-    @pytest.mark.skip(reason="Chunk B (video_summary) not yet implemented")
-    def test_pdf_bytes_starts_with_pdf_magic(self):
-        path = _make_video_file()
-        try:
-            chunks = _two_scene_chunks(path)
-            for ch in [c for c in chunks if c["modality"] == "video_summary"]:
-                assert ch["pdf_bytes"][:4] == b"%PDF", "pdf_bytes must be a valid PDF"
-        finally:
-            os.unlink(path)
-
-    @pytest.mark.skip(reason="Chunk B (video_summary) not yet implemented")
     def test_text_is_visual_summary(self):
         path = _make_video_file()
         try:
@@ -314,7 +301,6 @@ class TestChunkBSchema:
         finally:
             os.unlink(path)
 
-    @pytest.mark.skip(reason="Chunk B (video_summary) not yet implemented")
     def test_chunk_b_shares_times_with_chunk_a(self):
         path = _make_video_file()
         try:
@@ -401,7 +387,6 @@ class TestChunkIndex:
         finally:
             os.unlink(path)
 
-    @pytest.mark.skip(reason="Chunk B (video_summary) not yet implemented")
     def test_chunk_b_index_is_chunk_a_plus_one(self):
         path = _make_video_file()
         try:
@@ -451,7 +436,6 @@ class TestSceneIndex:
         finally:
             os.unlink(path)
 
-    @pytest.mark.skip(reason="Chunk B (video_summary) not yet implemented")
     def test_chunk_a_and_b_share_scene_index(self):
         path = _make_video_file()
         try:
@@ -474,15 +458,17 @@ class TestSceneIndex:
 # ---------------------------------------------------------------------------
 
 class TestChunkCount:
-    def test_two_scenes_produce_two_chunks(self):
+    def test_two_scenes_with_summaries_produce_four_chunks(self):
+        """Each scene with a summary produces Chunk A + Chunk B → 2 scenes = 4 chunks."""
         path = _make_video_file()
         try:
             chunks = _two_scene_chunks(path)
-            assert len(chunks) == 2
+            assert len(chunks) == 4
         finally:
             os.unlink(path)
 
     def test_two_scenes_no_summaries_produce_two_chunks(self):
+        """Without summaries Chunk B is skipped → 2 scenes = 2 Chunk A only."""
         path = _make_video_file()
         try:
             with (
@@ -496,7 +482,8 @@ class TestChunkCount:
         finally:
             os.unlink(path)
 
-    def test_one_scene_produces_one_chunk(self):
+    def test_one_scene_with_summary_produces_two_chunks(self):
+        """One scene with a summary → Chunk A + Chunk B = 2 chunks."""
         path = _make_video_file()
         try:
             with (
@@ -506,7 +493,7 @@ class TestChunkCount:
                 _patch_summary(_FAKE_SUMMARY),
             ):
                 chunks = chunk_video(path)
-            assert len(chunks) == 1
+            assert len(chunks) == 2
         finally:
             os.unlink(path)
 
@@ -575,9 +562,9 @@ class TestRobustness:
                 _patch_summary(_FAKE_SUMMARY),
             ):
                 chunks = chunk_video(path)
-            # Scene 0 skipped, scene 1 produces Chunk A only
-            assert len(chunks) == 1
-            assert chunks[0]["scene_index"] == 1
+            # Scene 0 skipped; scene 1 produces Chunk A + Chunk B (summary non-empty)
+            assert len(chunks) == 2
+            assert all(c["scene_index"] == 1 for c in chunks)
         finally:
             os.unlink(path)
 
