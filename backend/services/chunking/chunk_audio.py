@@ -41,10 +41,8 @@ _OVERLAP_S: float = config.AUDIO_FORCED_SPLIT_OVERLAP_S
 _TRANSCRIPTION_SEGMENT_S: float = config.AUDIO_TRANSCRIPTION_SEGMENT_S
 _TRANSCRIPTION_OVERLAP_S: float = config.AUDIO_TRANSCRIPTION_OVERLAP_S
 _TRANSCRIPTION_MAX_TOKENS: int = config.AUDIO_TRANSCRIPTION_MAX_TOKENS
-_TRANSCRIPTION_MAX_RETRIES: int = 3
-# 5 workers: fully covers the common case (≤1 hr = ≤4 windows) with one spare
-# slot, while staying well within API concurrency limits for any project tier.
-_TRANSCRIPTION_MAX_WORKERS: int = 5
+_TRANSCRIPTION_MAX_RETRIES: int = config.AUDIO_TRANSCRIPTION_MAX_RETRIES
+_TRANSCRIPTION_MAX_WORKERS: int = config.AUDIO_TRANSCRIPTION_MAX_WORKERS
 
 _TRANSCRIPTION_PROMPT: str = (
     "Transcribe this audio with speaker diarization and precise timestamps. "
@@ -150,7 +148,7 @@ def _transcribe_window(
 
     try:
         response = _gemini_client.models.generate_content(
-            model="gemini-2.5-flash",
+            model=config.AUDIO_TRANSCRIPTION_MODEL,
             contents=[audio_part, _TRANSCRIPTION_PROMPT],
             config=genai_types.GenerateContentConfig(
                 max_output_tokens=_TRANSCRIPTION_MAX_TOKENS,

@@ -125,7 +125,7 @@ def _generate_image_caption(image_bytes: bytes, mime_type: str) -> str:
     try:
         image_part = genai_types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
         response = _gemini_client.models.generate_content(
-            model="gemini-2.5-flash",
+            model=config.IMAGE_CAPTION_MODEL,
             contents=[image_part, _CAPTION_PROMPT],
         )
         text = "".join(
@@ -152,7 +152,7 @@ def _detect_regions(
         region_prompt = _REGION_PROMPT_TEMPLATE.format(width=img_width, height=img_height)
         image_part = genai_types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
         response = _gemini_client.models.generate_content(
-            model="gemini-2.5-flash",
+            model=config.IMAGE_CAPTION_MODEL,
             contents=[image_part, region_prompt],
         )
         response_text = "".join(
@@ -184,7 +184,7 @@ def _caption_all_crops(crops: list[tuple[bytes, str, str]]) -> list[str]:
         Empty string for any crop that fails.
     """
     captions: list[str] = [""] * len(crops)
-    with ThreadPoolExecutor(max_workers=min(len(crops), 8)) as executor:
+    with ThreadPoolExecutor(max_workers=min(len(crops), config.IMAGE_CAPTION_MAX_WORKERS)) as executor:
         future_to_idx = {
             executor.submit(_generate_image_caption, crop_bytes, mime_type): i
             for i, (crop_bytes, mime_type, _label) in enumerate(crops)

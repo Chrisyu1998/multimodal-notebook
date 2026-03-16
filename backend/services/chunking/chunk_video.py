@@ -137,7 +137,7 @@ def _generate_visual_summary(video_bytes: bytes) -> str:
             data=video_bytes, mime_type="video/mp4"
         )
         response = _gemini_client.models.generate_content(
-            model="gemini-3.1-flash-lite-preview",
+            model=config.VIDEO_SUMMARY_MODEL,
             contents=[video_part, _VISUAL_SUMMARY_PROMPT],
             config=genai_types.GenerateContentConfig(max_output_tokens=_SUMMARY_MAX_TOKENS),
         )

@@ -56,6 +56,12 @@ EMBEDDING_RETRYABLE_STATUS_CODES: frozenset[int] = frozenset({429, 500, 502, 503
 GENERATION_MODEL: str = "gemini-2.5-flash"       # immutable — see CLAUDE.md
 RERANK_MODEL: str = "gemini-2.5-flash"          # immutable — see CLAUDE.md
 GENERATION_THINKING_BUDGET: int = _optional_int("GENERATION_THINKING_BUDGET", 1024)
+IMAGE_CAPTION_MODEL: str = "gemini-2.5-flash"   # captions + region detection at ingestion
+IMAGE_CAPTION_MAX_WORKERS: int = _optional_int("IMAGE_CAPTION_MAX_WORKERS", 8)  # parallel crop captioning
+VIDEO_SUMMARY_MODEL: str = "gemini-3.1-flash-lite-preview"  # visual summary per video scene
+AUDIO_TRANSCRIPTION_MODEL: str = "gemini-2.5-flash"  # transcription with speaker diarization
+AUDIO_TRANSCRIPTION_MAX_RETRIES: int = _optional_int("AUDIO_TRANSCRIPTION_MAX_RETRIES", 3)
+AUDIO_TRANSCRIPTION_MAX_WORKERS: int = _optional_int("AUDIO_TRANSCRIPTION_MAX_WORKERS", 5)  # fully covers ≤1 hr files (≤4 windows) with one spare
 
 # ============================================================
 # Google Cloud Storage
@@ -111,9 +117,6 @@ TMP_UPLOADS_DIR: str = str(Path(_optional("TMP_UPLOAD_DIR", "./tmp")) / "uploads
 BM25_TOP_K: int = _optional_int("BM25_TOP_K", 20)
 VECTOR_TOP_K: int = _optional_int("VECTOR_TOP_K", 20)
 RERANK_TOP_K: int = _optional_int("RERANK_TOP_K", 5)
-CONTEXT_WINDOW_FILL_THRESHOLD: float = _optional_float(
-    "CONTEXT_WINDOW_FILL_THRESHOLD", 0.80
-)
 
 # ============================================================
 # Eval
