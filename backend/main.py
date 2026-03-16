@@ -107,9 +107,6 @@ def _log_config() -> None:
     logger.info(f"  BM25_TOP_K               : {config.BM25_TOP_K}")
     logger.info(f"  VECTOR_TOP_K             : {config.VECTOR_TOP_K}")
     logger.info(f"  RERANK_TOP_K             : {config.RERANK_TOP_K}")
-    logger.info(
-        f"  CONTEXT_WINDOW_THRESHOLD : {config.CONTEXT_WINDOW_FILL_THRESHOLD}"
-    )
     # Eval
     logger.info(f"  EVAL_DB_PATH             : {config.EVAL_DB_PATH}")
     logger.info(f"  EVAL_DATASET_PATH        : {config.EVAL_DATASET_PATH}")

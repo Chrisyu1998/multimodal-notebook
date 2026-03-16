@@ -440,14 +440,27 @@ def rerank(query: str, chunks: list[dict], top_k: int = 5) -> list[dict]:
         chunk["rerank_score"] = id_to_score.get(i + 1, 0.0)
 
     ranked = sorted(chunks, key=lambda c: c["rerank_score"], reverse=True)
+
+    # Drop zero-score chunks — the reranker explicitly scored them 0.0 = completely
+    # unrelated.  Passing them to generation adds noise and increases hallucination
+    # risk.  Always keep at least 1 chunk (top by RRF score) so the pipeline never
+    # sends empty context.
+    candidates = ranked[:top_k]
+    filtered = [c for c in candidates if c["rerank_score"] > 0.0]
+    if not filtered:
+        filtered = candidates[:1]
+        logger.warning(
+            "rerank: all chunks scored 0.0 — keeping top-1 as fallback context"
+        )
+
     logger.info(
-        f"rerank: top {top_k}/{len(chunks)} scores: "
-        f"{[round(c['rerank_score'], 3) for c in ranked[:top_k]]}"
+        f"rerank: {len(filtered)}/{len(candidates)} chunks kept after zero-score filter "
+        f"(scores: {[round(c['rerank_score'], 3) for c in filtered]})"
     )
-    for i, c in enumerate(ranked[:top_k]):
+    for i, c in enumerate(filtered):
         logger.debug(
             f"  [{i + 1}] rerank={c['rerank_score']:.3f} rrf={c.get('score', 0):.4f} "
             f"src={c.get('source', '?')} pg={c.get('page', '?')} "
             f"| {c['text'][:100]!r}"
         )
-    return ranked[:top_k]
+    return filtered
