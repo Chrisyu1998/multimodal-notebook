@@ -5,13 +5,9 @@ and returns a grounded answer from Gemini 2.5 Flash.
 
 Pipeline order:
   1. Guard: reject if no documents are indexed yet
-  2. HyDE — expand query into hypothetical answer, embed it
-  3. BM25 keyword search  → top 20
-  4. Vector search (ChromaDB) → top 20
-  5. Reciprocal Rank Fusion → merged ranked list
-  6. Rerank with Gemini Flash → top 5
-  7. Dynamic context window check → summarize if >80% full
-  8. Gemini 2.5 Flash generates answer (Chain-of-Thought prompt)
+  2. hybrid_search — HyDE + BM25 + vector + RRF fusion → top 20 chunks
+  3. TODO: rerank — Gemini Flash scores top 20 → keeps top 5
+  4. Gemini 2.5 Flash generates answer (grounded, Chain-of-Thought prompt)
 """
 
 import time
@@ -20,9 +16,10 @@ from loguru import logger
 
 import backend.config as config
 from backend.models.schemas import QueryRequest, QueryResponse, SourceReference
-from backend.services import embeddings, vectorstore, generation
+from backend.services import generation, vectorstore
 from backend.services.embeddings import EmbeddingBatchError
 from backend.services.generation import GenerationError
+from backend.services.retrieval import hybrid_search
 from backend.services.vectorstore import VectorStoreUnavailableError
 
 router = APIRouter()
@@ -30,7 +27,7 @@ router = APIRouter()
 
 @router.post("/", response_model=QueryResponse)
 async def query(request: QueryRequest) -> QueryResponse:
-    """Embed question → vector search → generate grounded answer with Gemini."""
+    """Run hybrid retrieval → generate grounded answer with Gemini."""
     logger.info(f"Query received: {request.question!r}")
     start = time.monotonic()
 
@@ -46,31 +43,21 @@ async def query(request: QueryRequest) -> QueryResponse:
         logger.error(f"Vector store unavailable during empty-collection check: {exc}")
         raise HTTPException(status_code=503, detail="Vector store unavailable.") from exc
 
-    # ---- 2. Embed question ----
+    # ---- 2. Hybrid search: HyDE + BM25 + vector + RRF → top 20 ----
     try:
-        query_embedding = embeddings.embed_text(request.question)
+        chunks = hybrid_search(request.question, top_k=config.VECTOR_TOP_K)
     except EmbeddingBatchError as exc:
-        logger.error(f"Embedding failed for query: {exc}")
+        logger.error(f"Embedding failed during hybrid search: {exc}")
         raise HTTPException(
             status_code=503,
             detail="Embedding service unavailable. Check your API key.",
         ) from exc
-    except Exception as exc:
-        logger.error(f"Unexpected embedding error: {exc}")
-        raise HTTPException(
-            status_code=503,
-            detail="Embedding service unavailable. Check your API key.",
-        ) from exc
-
-    # ---- 3. Retrieve chunks ----
-    try:
-        chunks = vectorstore.search_balanced(query_embedding)[:5]
     except VectorStoreUnavailableError as exc:
-        logger.error(f"Vector store unavailable during search: {exc}")
+        logger.error(f"Vector store unavailable during hybrid search: {exc}")
         raise HTTPException(status_code=503, detail="Vector store unavailable.") from exc
     except Exception as exc:
-        logger.error(f"Vector search failed: {exc}")
-        raise HTTPException(status_code=502, detail="Vector search failed.") from exc
+        logger.error(f"Hybrid search failed: {exc}")
+        raise HTTPException(status_code=502, detail="Retrieval failed.") from exc
 
     if not chunks:
         elapsed_ms = (time.monotonic() - start) * 1000
@@ -82,14 +69,14 @@ async def query(request: QueryRequest) -> QueryResponse:
             model=config.GENERATION_MODEL,
         )
 
-    # ---- 4. Generate answer ----
+    # ---- 3. Generate answer ----
     try:
         result = generation.generate_answer(request.question, chunks)
     except GenerationError as exc:
         logger.error(f"Generation failed: {exc}")
         raise HTTPException(
             status_code=503,
-            detail="Embedding service unavailable. Check your API key.",
+            detail="Generation service unavailable. Check your API key.",
         ) from exc
     except Exception as exc:
         logger.error(f"Unexpected generation error: {exc}")
