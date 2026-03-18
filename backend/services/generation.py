@@ -8,10 +8,6 @@ Modality handling at generation time:
   - PDF text / video_summary → plain text inline
   - image_global / image_local → caption text + JPEG/PNG inline_data from GCS
   - video_clip → SPEECH+VISUALS summary text + first-frame JPEG inline_data from GCS
-  - audio_clip → transcript text only (already transcribed at ingestion quality;
-                 re-sending the MP3 adds GCS latency without providing new
-                 information for content-focused RAG questions)
-
 GCS fetch failures fall back to text-only and are counted in media_chunks_degraded.
 Gemini API errors are classified as retryable (429/503/network) or config errors
 (401/400) so callers can map them to the correct HTTP status.
@@ -57,8 +53,7 @@ class GenerationConfigError(GenerationError):
 
 _SYSTEM_PROMPT = """\
 You are a precise research assistant answering questions from retrieved \
-document sources. The sources may include text passages, images, audio \
-transcripts, and video keyframes.
+document sources. The sources may include text passages, images, and video keyframes.
 
 INSTRUCTIONS:
 - Answer using ONLY the provided sources. Do not use outside knowledge.
@@ -127,9 +122,6 @@ def _build_context_parts(chunks: list[dict]) -> tuple[list[types.Part], int]:
       - video_clip: additionally one inline_data Part (first-frame JPEG from GCS)
         for visual grounding. Only the representative frame is stored in GCS —
         not the full clip.
-      - audio_clip: text-only. The transcript was produced by Gemini Flash at
-        ingestion; re-sending the MP3 is redundant and adds latency.
-
     GCS fetch failures are caught, logged, and counted. The affected chunk falls
     back to text-only so generation continues unblocked.
 
@@ -206,7 +198,7 @@ def _build_context_parts(chunks: list[dict]) -> tuple[list[types.Part], int]:
                 )
                 continue
 
-        # --- Text-only path: PDF, video_summary, audio_clip, or GCS fallback ---
+        # --- Text-only path: PDF, video_summary, or GCS fallback ---
         parts.append(types.Part.from_text(text=citation))
 
     return parts, degraded_count
@@ -220,7 +212,7 @@ def generate_answer(question: str, chunks: list[dict]) -> dict:
     """Call Gemini 2.5 Flash with a grounded multimodal RAG prompt.
 
     Constructs a multipart Content list combining text citations with inline
-    media (images and video frames fetched from GCS). Audio and PDF chunks
+    media (images and video frames fetched from GCS). PDF chunks
     pass transcript/text only. Native thinking (thinking_config) is used for
     chain-of-thought reasoning instead of prompted <thinking> blocks, keeping
     the response clean and avoiding format-parsing fragility.

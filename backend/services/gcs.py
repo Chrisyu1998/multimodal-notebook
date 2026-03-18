@@ -7,7 +7,6 @@ google.cloud.storage directly.
 Blob naming convention:
     media/{file_hash}/img_{chunk_index}.jpg        — image global/local chunks
     media/{file_hash}/video_frame_{chunk_index}.jpg — mid-point frame for reranking
-    media/{file_hash}/audio_{chunk_index}.mp3       — audio clip chunks
 """
 
 from google.cloud import storage

@@ -135,8 +135,8 @@ class TestEmbeddingBatchError:
         assert err.attempts == 2
 
     def test_str_includes_context(self):
-        err = EmbeddingBatchError("audio", [5], Exception("timeout"), attempts=3)
-        assert "audio" in str(err)
+        err = EmbeddingBatchError("video", [5], Exception("timeout"), attempts=3)
+        assert "video" in str(err)
         assert "5" in str(err)
         assert "3" in str(err)
 
@@ -338,12 +338,11 @@ class TestEmbedMediaBatch:
 
 
 # ---------------------------------------------------------------------------
-# embed_chunks — single-file types (video, audio) — 1 call per chunk
+# embed_chunks — single-file types (video) — 1 call per chunk
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("chunk_type,expected_mime", [
     ("video", "video/mp4"),
-    ("audio", "audio/mp3"),
 ])
 class TestEmbedChunksSingleFileTypes:
     def test_embedding_added(self, chunk_type, expected_mime):
@@ -445,8 +444,7 @@ class TestEmbedChunksMixed:
         chunks = [
             make_image_chunk(0),
             make_media_chunk("video", 1),
-            make_media_chunk("audio", 2),
-            make_document_chunk(3),
+            make_document_chunk(2),
         ]
 
         with patch.object(emb._client.models, "embed_content", side_effect=capture_parts_call):

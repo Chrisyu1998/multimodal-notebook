@@ -4,12 +4,12 @@ Embeddings service — wraps the Gemini Embedding 2 API (google-genai SDK).
 Key rules:
 - Model: gemini-embedding-2-preview (natively multimodal)
 - embed_text: single string, used only for query embedding at search time
-- embed_chunks: handles image, video, audio, and document chunks
+- embed_chunks: handles image, video, and document chunks
   - Images: batched up to 6 per request (hard API limit)
   - Documents: batched up to 250 per request (hard API limit), but the 20,000-token
     per-request cap is the binding constraint — default batch size is 20 (~800 tokens
     × 20 = 16,000 tokens, safely under the limit)
-  - Video / audio: 1 per request, all concurrent
+  - Video: 1 per request, all concurrent
 - Transient errors (429, 5xx, unknown) are retried with exponential backoff
 - Permanent errors (4xx except 429) fail immediately — no wasted retries
 - Failures raise EmbeddingBatchError with chunk_type + indices for checkpointing
@@ -34,19 +34,17 @@ _MAX_RETRIES = config.EMBEDDING_MAX_RETRIES
 _MAX_WORKERS = config.EMBEDDING_MAX_WORKERS
 
 # Types that must be sent one per API request
-_SINGLE_FILE_TYPES = {"video", "audio"}
+_SINGLE_FILE_TYPES = {"video"}
 
 # Maps chunk type → bytes field name (document chunks embed text, not bytes)
 _MEDIA_BYTES_FIELD: dict[str, str] = {
     "image": "image_bytes",
     "video": "video_bytes",
-    "audio": "audio_bytes",
 }
 
 # Fixed MIME types for non-image media
 _MEDIA_MIME: dict[str, str] = {
     "video": "video/mp4",
-    "audio": "audio/mp3",
 }
 
 _RETRYABLE_STATUS_CODES = config.EMBEDDING_RETRYABLE_STATUS_CODES
@@ -91,7 +89,7 @@ def embed_text(text: str) -> list[float]:
 def embed_chunks(chunks: list[dict]) -> list[dict]:
     """Add an 'embedding' key (list[float]) to each chunk dict in-place.
 
-    Supports image, video, audio, and document chunks.
+    Supports image, video, and document chunks.
     Raises EmbeddingBatchError on failure — contains chunk_type and indices
     so the caller can checkpoint and re-queue exactly the affected chunks.
     """
@@ -133,7 +131,7 @@ def embed_chunks(chunks: list[dict]) -> list[dict]:
             future = executor.submit(_embed_text_batch, batch)
             futures[future] = ("document", batch)
 
-        # Video / audio — exactly 1 per call, all concurrent
+        # Video — exactly 1 per call, all concurrent
         for i, chunk in single_items:
             future = executor.submit(_embed_media_batch, [(i, chunk)])
             futures[future] = (chunk["type"], [(i, chunk)])

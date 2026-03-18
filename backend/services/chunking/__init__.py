@@ -7,9 +7,8 @@ Re-exports all chunkers so callers can use:
     chunking.chunk_image(...)
 """
 
-from backend.services.chunking.chunk_audio import chunk_audio
 from backend.services.chunking.chunk_image import chunk_image
 from backend.services.chunking.chunk_pdf import chunk_pdf
 from backend.services.chunking.chunk_video import chunk_video
 
-__all__ = ["chunk_pdf", "chunk_image", "chunk_video", "chunk_audio"]
+__all__ = ["chunk_pdf", "chunk_image", "chunk_video"]

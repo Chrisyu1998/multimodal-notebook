@@ -27,8 +27,8 @@ def _upload_chunk_media(chunk: dict, file_hash: str) -> None:
     """Upload a chunk's media bytes to GCS and stamp gcs_uri on it in-place.
 
     Called after chunking, before embedding.  The large byte fields
-    (image_bytes, video_bytes, audio_bytes) are only available in this
-    window — they are stripped before ChromaDB / BM25 storage.
+    (image_bytes, video_bytes) are only available in this window — they are
+    stripped before ChromaDB / BM25 storage.
 
     Modality mapping:
       image_global / image_local → upload image bytes; stamp gcs_uri.
@@ -36,7 +36,6 @@ def _upload_chunk_media(chunk: dict, file_hash: str) -> None:
                    (cheap) and upload that; stamp gcs_uri with the frame URI
                    so the reranker downloads a small JPEG instead of the
                    full video.
-      audio_clip → upload the pre-sliced MP3 clip bytes; stamp gcs_uri.
       everything else (pdf text, video_summary) → no GCS upload needed.
     """
     modality: str = chunk.get("modality", "")
@@ -74,14 +73,6 @@ def _upload_chunk_media(chunk: dict, file_hash: str) -> None:
         except Exception as exc:
             logger.warning(f"Frame extraction failed for video chunk {idx}: {exc}")
             chunk["gcs_uri"] = ""
-
-    elif modality == "audio_clip":
-        uri = gcs.upload_bytes(
-            chunk["audio_bytes"],
-            f"media/{file_hash}/audio_{idx}.mp3",
-            "audio/mp3",
-        )
-        chunk["gcs_uri"] = uri
 
     else:
         # PDF text chunks and video_summary chunks need no GCS upload.
@@ -153,8 +144,6 @@ async def upload_file(file: UploadFile = File(...)) -> UploadResponse:
             chunks = chunking.chunk_pdf(str(dest))
         elif suffix in {".png", ".jpg", ".jpeg", ".webp"}:
             chunks = chunking.chunk_image(str(dest))
-        elif suffix in {".mp3", ".wav", ".m4a"}:
-            chunks = chunking.chunk_audio(str(dest))
         else:  # .mp4, .mov
             chunks = chunking.chunk_video(str(dest))
     except ValueError as exc:

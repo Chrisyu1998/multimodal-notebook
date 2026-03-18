@@ -19,7 +19,7 @@ Design notes:
   - BM25 results carry a nested 'metadata' dict; vector results are flat.
     _normalize() collapses both into the same shape so RRF can treat them uniformly.
   - Reranker sends a single multimodal Gemini request so all candidates are scored
-    relative to each other.  Image/audio/video chunks pass their actual media bytes
+    relative to each other.  Image/video chunks pass their actual media bytes
     (or a pre-extracted JPEG frame for video) instead of caption text, eliminating
     the cross-modal embedding bias that would otherwise penalise non-text chunks.
 """
@@ -312,8 +312,6 @@ def _build_rerank_parts(query: str, chunks: list[dict]) -> list[types.Part]:
                                      from GCS plus the text summary as context.
                                      Using a frame avoids downloading the full
                                      MP4 clip at query time (~1000× smaller).
-      - audio_clip                 → the pre-sliced MP3 bytes from GCS.
-
     If a GCS fetch fails for any chunk, that chunk falls back to its text
     representation so the reranker always receives a complete candidate list.
 
@@ -368,18 +366,6 @@ def _build_rerank_parts(query: str, chunks: list[dict]) -> list[types.Part]:
                     f"({gcs_uri}): {exc} — falling back to text"
                 )
 
-        elif modality == "audio_clip" and gcs_uri:
-            try:
-                audio_bytes = gcs.download_bytes(gcs_uri)
-                parts.append(f"{label} [Audio clip] ")
-                parts.append(types.Part.from_bytes(data=audio_bytes, mime_type="audio/mp3"))
-                continue
-            except Exception as exc:
-                logger.warning(
-                    f"rerank: GCS fetch failed for audio chunk {i+1} "
-                    f"({gcs_uri}): {exc} — falling back to text"
-                )
-
         # Fallback path: text (used for pdf/text chunks, video_summary chunks,
         # and any media chunk whose GCS fetch failed above).
         parts.append(f"{label} {chunk['text'][:400]}")
@@ -390,8 +376,8 @@ def _build_rerank_parts(query: str, chunks: list[dict]) -> list[types.Part]:
 def rerank(query: str, chunks: list[dict], top_k: int = 5) -> list[dict]:
     """Score all candidate chunks in a single multimodal Gemini Flash call, keep top_k.
 
-    Sends one request containing all chunks — text as plain text, images/audio
-    as their actual bytes, video clips as a pre-extracted mid-point JPEG frame —
+    Sends one request containing all chunks — text as plain text, images as their
+    actual bytes, video clips as a pre-extracted mid-point JPEG frame —
     so the model scores candidates relative to each other in a single calibrated
     pass.  Falls back to the existing RRF order if the API call or JSON parsing
     fails.
