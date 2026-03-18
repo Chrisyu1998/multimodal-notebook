@@ -18,6 +18,7 @@ import asyncio
 import json
 import sqlite3
 import time
+from typing import Optional
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,6 +26,7 @@ from pathlib import Path
 from loguru import logger
 
 import backend.config as config
+from backend.services import bm25_index
 from backend.services.generation import generate_answer
 from backend.services.retrieval import hybrid_search, rerank
 
@@ -55,7 +57,7 @@ def _percentile(values: list[float], p: int) -> float:
     return sorted_vals[lower] + frac * (sorted_vals[upper] - sorted_vals[lower])
 
 
-def _load_dataset(path: str, category: str | None) -> list[dict]:
+def _load_dataset(path: str, category: Optional[str]) -> list[dict]:
     """Load golden_dataset.json and optionally filter by category.
 
     Args:
@@ -337,6 +339,8 @@ async def main() -> None:
              "adversarial, out-of-scope).",
     )
     args = parser.parse_args()
+
+    bm25_index.load_index()
 
     queries = _load_dataset(config.EVAL_DATASET_PATH, args.category)
 

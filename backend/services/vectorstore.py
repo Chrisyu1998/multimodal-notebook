@@ -108,6 +108,8 @@ def add_chunks(chunks: list[dict]) -> None:
                 "modality": c.get("modality", ""),
                 "type": c.get("type", ""),
                 "gcs_uri": c.get("gcs_uri", ""),
+                "section_heading": c.get("section_heading", ""),
+                "document_title": c.get("document_title", ""),
             }
             for c in new_chunks
         ],
