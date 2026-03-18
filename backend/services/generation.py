@@ -277,6 +277,15 @@ def generate_answer(question: str, chunks: list[dict]) -> dict:
 
     answer_text = response.text.strip()
 
+    # Token usage — available on response.usage_metadata (may be None for some
+    # model versions; guard with getattr so callers never see a missing attribute).
+    usage = getattr(response, "usage_metadata", None)
+    input_tokens: int = int(getattr(usage, "prompt_token_count", 0) or 0)
+    output_tokens: int = int(getattr(usage, "candidates_token_count", 0) or 0)
+    logger.debug(
+        f"generate: token usage — input={input_tokens} output={output_tokens}"
+    )
+
     # Citation validation — warn if the model references a [N] that doesn't
     # correspond to any retrieved chunk (hallucinated source reference).
     cited_indices = {int(m) for m in re.findall(r"\[(\d+)\]", answer_text)}
@@ -304,4 +313,6 @@ def generate_answer(question: str, chunks: list[dict]) -> dict:
         "chunks_used": len(chunks),
         "model": config.GENERATION_MODEL,
         "media_chunks_degraded": degraded_count,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
     }

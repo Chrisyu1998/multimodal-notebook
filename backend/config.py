@@ -117,4 +117,5 @@ EVAL_DB_PATH: str = _optional(
 EVAL_DATASET_PATH: str = _optional(
     "EVAL_DATASET_PATH", "./backend/eval/golden_dataset.json"
 )
+EVAL_RESULTS_DIR: str = _optional("EVAL_RESULTS_DIR", "./evals")
 EVAL_JUDGE_MODEL: str = _optional("EVAL_JUDGE_MODEL", "gemini-2.5-pro")
