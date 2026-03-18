@@ -1,0 +1,658 @@
+{
+  "_meta": {
+    "version": "1.1",
+    "corpus_files": [
+      "transformer_technical_report.pdf",
+      "transformer_architecture.png",
+      "transformer_video.mp4",
+      "transformer_audio.mp3"
+    ],
+    "chunk_id_format": "{modality}:{filename}:chunk_{index}",
+    "note": "relevant_chunk_ids use logical IDs resolved at eval time via the chunk_index + source metadata stored in ChromaDB. Empty list means out-of-scope (no answer expected in corpus).",
+    "fields": {
+      "difficulty": "easy | medium | hard",
+      "tests": "pipeline component and aspect under test",
+      "source_modality": "present on factual questions only — pdf | image | video | audio",
+      "ground_truth_status": {
+        "all_modalities": "VERIFIED — all ground truths validated against actual corpus files (PDF text, architecture image, video frames + narration, audio narration) as of v1.1"
+      }
+    }
+  },
+  "queries": [
+    {
+      "id": "factual_001",
+      "query": "What is the dimensionality of the model (d_model) used in the base transformer?",
+      "ground_truth": "The base transformer model uses a d_model of 512.",
+      "relevant_chunk_ids": [
+        "pdf:transformer_technical_report:chunk_10",
+        "pdf:transformer_technical_report:chunk_11"
+      ],
+      "category": "factual",
+      "source_modality": "pdf",
+      "difficulty": "easy",
+      "tests": "BM25 + vector retrieval for exact numeric parameter (d_model) from PDF"
+    },
+    {
+      "id": "factual_002",
+      "query": "How many attention heads does the base transformer use?",
+      "ground_truth": "The base transformer uses 8 parallel attention heads.",
+      "relevant_chunk_ids": [
+        "pdf:transformer_technical_report:chunk_10",
+        "pdf:transformer_technical_report:chunk_11"
+      ],
+      "category": "factual",
+      "source_modality": "pdf",
+      "difficulty": "easy",
+      "tests": "BM25 + vector retrieval for exact numeric parameter (num heads) from PDF"
+    },
+    {
+      "id": "factual_003",
+      "query": "What is the formula for scaled dot-product attention?",
+      "ground_truth": "Scaled dot-product attention is computed as Attention(Q, K, V) = softmax(QK^T / sqrt(d_k)) * V, where d_k is the dimension of the key vectors.",
+      "relevant_chunk_ids": [
+        "pdf:transformer_technical_report:chunk_5",
+        "pdf:transformer_technical_report:chunk_6"
+      ],
+      "category": "factual",
+      "source_modality": "pdf",
+      "difficulty": "medium",
+      "tests": "vector retrieval for math formula; tests exact formula recall without paraphrase"
+    },
+    {
+      "id": "factual_004",
+      "query": "What optimizer was used to train the original transformer?",
+      "ground_truth": "The original transformer was trained using the Adam optimizer with beta1=0.9, beta2=0.98, and epsilon=1e-9.",
+      "relevant_chunk_ids": [
+        "pdf:transformer_technical_report:chunk_18",
+        "pdf:transformer_technical_report:chunk_19"
+      ],
+      "category": "factual",
+      "source_modality": "pdf",
+      "difficulty": "easy",
+      "tests": "BM25 retrieval for optimizer name + parameters from PDF training section"
+    },
+    {
+      "id": "factual_005",
+      "query": "What is the purpose of positional encoding in the transformer architecture?",
+      "ground_truth": "Positional encoding injects information about the relative or absolute position of tokens into the sequence since the transformer contains no recurrence or convolution. The encodings are added to the input embeddings.",
+      "relevant_chunk_ids": [
+        "pdf:transformer_technical_report:chunk_7",
+        "pdf:transformer_technical_report:chunk_8"
+      ],
+      "category": "factual",
+      "source_modality": "pdf",
+      "difficulty": "easy",
+      "tests": "vector retrieval for conceptual explanation from PDF"
+    },
+    {
+      "id": "factual_006",
+      "query": "How many encoder layers and decoder layers does the base transformer model have?",
+      "ground_truth": "The base transformer has a stack of 6 identical encoder layers and 6 identical decoder layers (N=6).",
+      "relevant_chunk_ids": [
+        "pdf:transformer_technical_report:chunk_2",
+        "pdf:transformer_technical_report:chunk_3"
+      ],
+      "category": "factual",
+      "source_modality": "pdf",
+      "difficulty": "easy",
+      "tests": "BM25 + vector retrieval for exact numeric parameter (N layers) from PDF"
+    },
+    {
+      "id": "factual_007",
+      "query": "What BLEU score did the transformer achieve on WMT 2014 English-to-German translation?",
+      "ground_truth": "The transformer achieved a BLEU score of 28.4 on the WMT 2014 English-to-German translation task, outperforming all previously published models.",
+      "relevant_chunk_ids": [
+        "pdf:transformer_technical_report:chunk_20",
+        "pdf:transformer_technical_report:chunk_21"
+      ],
+      "category": "factual",
+      "source_modality": "pdf",
+      "difficulty": "easy",
+      "tests": "BM25 retrieval for benchmark result (BLEU score) from PDF results table"
+    },
+    {
+      "id": "factual_008",
+      "query": "What is the feed-forward network inner-layer dimensionality (d_ff) in the base transformer?",
+      "ground_truth": "The position-wise feed-forward network in the base transformer has an inner-layer dimensionality of d_ff = 2048.",
+      "relevant_chunk_ids": [
+        "pdf:transformer_technical_report:chunk_9",
+        "pdf:transformer_technical_report:chunk_10"
+      ],
+      "category": "factual",
+      "source_modality": "pdf",
+      "difficulty": "easy",
+      "tests": "BM25 + vector retrieval for exact numeric parameter (d_ff) from PDF"
+    },
+    {
+      "id": "factual_009",
+      "query": "What regularization technique is used in the transformer, and what does the ablation study show about its importance?",
+      "ground_truth": "The transformer uses dropout regularization, with a rate of 0.1 for the base model and 0.3 for the big model. The ablation study demonstrates its critical importance: removing dropout entirely drops BLEU from 25.8 to 24.6 (a 1.2-point degradation) on English-to-German translation.",
+      "relevant_chunk_ids": [
+        "pdf:transformer_technical_report:chunk_19",
+        "pdf:transformer_technical_report:chunk_23",
+        "pdf:transformer_technical_report:chunk_24"
+      ],
+      "category": "factual",
+      "source_modality": "pdf",
+      "difficulty": "medium",
+      "tests": "vector retrieval for regularization details + ablation results; tests completeness of generation across two PDF sections"
+    },
+    {
+      "id": "factual_010_img",
+      "query": "In the architecture diagram, what is labeled at the very top of the decoder stack as the final processing stage before output?",
+      "ground_truth": "The top of the decoder stack is labeled 'Linear + Softmax', described as producing a vocabulary-sized probability vector for the next token.",
+      "relevant_chunk_ids": [
+        "image:transformer_architecture:chunk_0"
+      ],
+      "category": "factual",
+      "source_modality": "image",
+      "difficulty": "medium",
+      "tests": "image_global chunk retrieval; tests reading top-level labels from architecture diagram"
+    },
+    {
+      "id": "factual_011_img",
+      "query": "What two components are shown at the very bottom of both the encoder and decoder stacks in the architecture diagram?",
+      "ground_truth": "Both stacks show an embedding layer ('Input Embedding' or 'Output Embedding') and a 'Positional Encoding' component added to it at the bottom, before the first attention layer.",
+      "relevant_chunk_ids": [
+        "image:transformer_architecture:chunk_0"
+      ],
+      "category": "factual",
+      "source_modality": "image",
+      "difficulty": "medium",
+      "tests": "image_global chunk retrieval; tests reading bottom-of-stack components from architecture diagram"
+    },
+    {
+      "id": "factual_016_img",
+      "query": "In the architecture diagram, how does the decoder's first attention block differ from the encoder's attention block in its label and description?",
+      "ground_truth": "The decoder's first attention block is labeled 'Masked Multi-Head Self-Attention' with the sub-text 'Future tokens masked', while the encoder's attention block is labeled 'Multi-Head Self-Attention' with the sub-text 'h = 8 heads, d_k = d_v = 64'. The 'Masked' prefix and 'Future tokens masked' description indicate the decoder prevents attention to future positions to preserve auto-regressive generation.",
+      "relevant_chunk_ids": [
+        "image:transformer_architecture:chunk_0"
+      ],
+      "category": "factual",
+      "source_modality": "image",
+      "difficulty": "hard",
+      "tests": "image_local chunk retrieval for encoder vs decoder attention regions; tests contrastive reading of two block labels and their sub-text"
+    },
+    {
+      "id": "factual_017_img",
+      "query": "In the architecture diagram, what label and sub-text appear on the connection between the encoder and decoder stacks?",
+      "ground_truth": "The connection shows 'K, V' labeled arrows flowing from the encoder to the decoder's 'Cross-Attention (Encoder-Decoder)' block. The sub-text reads 'Keys + Values from encoder', indicating that the encoder provides key and value representations for the decoder's cross-attention mechanism.",
+      "relevant_chunk_ids": [
+        "image:transformer_architecture:chunk_0"
+      ],
+      "category": "factual",
+      "source_modality": "image",
+      "difficulty": "hard",
+      "tests": "image_local chunk retrieval for encoder-decoder connection; tests reading inter-stack connection labels and annotations"
+    },
+    {
+      "id": "factual_018_img",
+      "query": "What hyperparameters are shown in the Hyperparameter Summary section at the bottom of the architecture diagram, and what are the values for each model variant?",
+      "ground_truth": "The Hyperparameter Summary at the bottom of the diagram shows two model variants. Base Model: d_model=512, N=6, h=8, d_ff=2048, dropout=0.1. Big Model: d_model=1024, N=6, h=16, d_ff=4096, dropout=0.3.",
+      "relevant_chunk_ids": [
+        "image:transformer_architecture:chunk_0"
+      ],
+      "category": "factual",
+      "source_modality": "image",
+      "difficulty": "hard",
+      "tests": "image_local chunk retrieval for bottom summary section; tests reading tabular data embedded within an architecture diagram"
+    },
+    {
+      "id": "factual_012_video",
+      "query": "According to the video, what is the key computational advantage of the transformer's self-attention over recurrent layers?",
+      "ground_truth": "The video explains that recurrent networks process tokens one at a time, making it impossible to parallelize across sequence positions during training. The transformer eliminates recurrence entirely — self-attention lets every token attend to every other token in one step, enabling full parallelization on modern GPU hardware.",
+      "relevant_chunk_ids": [
+        "video:transformer_video:chunk_0",
+        "video:transformer_video:chunk_1"
+      ],
+      "category": "factual",
+      "source_modality": "video",
+      "difficulty": "medium",
+      "tests": "video_clip chunk retrieval; tests spoken content extraction for parallelism advantage"
+    },
+    {
+      "id": "factual_013_video",
+      "query": "In the video, how does the presenter explain the scaling factor and multi-head attention in the attention mechanism?",
+      "ground_truth": "The video explains that the scaling factor sqrt(d_k) with d_k = 64 per head is critical: without scaling, large dot products push softmax into near-zero gradient regions, slowing learning; dividing by sqrt(64) = 8 keeps variance stable. For multi-head attention, the video describes 8 parallel heads, each projecting to 64-dimensional subspaces, with outputs concatenated and projected back to 512 dimensions, allowing the model to jointly attend across different representation subspaces.",
+      "relevant_chunk_ids": [
+        "video:transformer_video:chunk_1",
+        "video:transformer_video:chunk_2"
+      ],
+      "category": "factual",
+      "source_modality": "video",
+      "difficulty": "medium",
+      "tests": "video_clip chunk retrieval for scaling + multi-head explanation; tests spoken content extraction for technical detail"
+    },
+    {
+      "id": "factual_014_audio",
+      "query": "In the audio explanation, how does the speaker introduce the concept of self-attention?",
+      "ground_truth": "The speaker introduces self-attention by explaining that the transformer eliminated recurrence entirely and instead uses self-attention, which allows every token to directly attend to every other token in a single step. This is contrasted with recurrent models (LSTMs and GRUs) that process tokens one at a time, making training slow and making it hard to capture dependencies between distant parts of the sentence.",
+      "relevant_chunk_ids": [
+        "audio:transformer_audio:chunk_0"
+      ],
+      "category": "factual",
+      "source_modality": "audio",
+      "difficulty": "medium",
+      "tests": "audio_clip chunk retrieval; tests transcript-based retrieval for self-attention introduction"
+    },
+    {
+      "id": "factual_015_audio",
+      "query": "According to the audio, what training details does the speaker mention for the base and big transformer models?",
+      "ground_truth": "The speaker states that the base model uses a dimension of 512, 8 attention heads, 6 layers, and a feed-forward dimension of 2048, trained for 100,000 steps in approximately 12 hours on eight NVIDIA P100 GPUs. The big model uses a dimension of 1024 with 16 heads, trained for 300,000 steps in approximately 3.5 days. On English-to-German the big transformer achieved 28.4 BLEU, surpassing all prior models by more than 2 points. On English-to-French it achieved 41.8 BLEU.",
+      "relevant_chunk_ids": [
+        "audio:transformer_audio:chunk_0"
+      ],
+      "category": "factual",
+      "source_modality": "audio",
+      "difficulty": "medium",
+      "tests": "audio_clip chunk retrieval for training configuration and benchmark results; tests transcript-based retrieval for multiple numeric facts"
+    },
+    {
+      "id": "multihop_001",
+      "query": "Given the base transformer uses d_model=512 and 8 attention heads, what is the dimension of each head's query, key, and value projections?",
+      "ground_truth": "Each head uses projections of dimension d_k = d_v = d_model / h = 512 / 8 = 64.",
+      "relevant_chunk_ids": [
+        "pdf:transformer_technical_report:chunk_5",
+        "pdf:transformer_technical_report:chunk_6",
+        "pdf:transformer_technical_report:chunk_10"
+      ],
+      "category": "multi-hop",
+      "difficulty": "medium",
+      "tests": "RRF fusion (d_model chunk + heads chunk); tests arithmetic reasoning across two retrieved facts"
+    },
+    {
+      "id": "multihop_002",
+      "query": "How does the training time and computational cost of the base transformer compare to the big transformer, and what hardware was used for both?",
+      "ground_truth": "Both models were trained on one machine with 8 NVIDIA P100 GPUs. The base model trained for 100,000 steps taking approximately 12 hours, while the big model trained for 300,000 steps taking approximately 3.5 days. The base model required 3.3 × 10^18 FLOPs compared to 2.3 × 10^19 FLOPs for the big model.",
+      "relevant_chunk_ids": [
+        "pdf:transformer_technical_report:chunk_18",
+        "pdf:transformer_technical_report:chunk_19",
+        "pdf:transformer_technical_report:chunk_20"
+      ],
+      "category": "multi-hop",
+      "difficulty": "medium",
+      "tests": "RRF fusion (training config + results table chunks); tests comparative reasoning across base and big model training details"
+    },
+    {
+      "id": "multihop_003",
+      "query": "Why is masking applied in decoder self-attention but not in encoder self-attention?",
+      "ground_truth": "The encoder processes the full input sequence simultaneously so every position can attend to all other positions — no masking is needed. The decoder must prevent positions from attending to future positions during training (to preserve the auto-regressive property), so a mask zeroes out all attention weights above the diagonal.",
+      "relevant_chunk_ids": [
+        "pdf:transformer_technical_report:chunk_3",
+        "pdf:transformer_technical_report:chunk_4",
+        "pdf:transformer_technical_report:chunk_5"
+      ],
+      "category": "multi-hop",
+      "difficulty": "hard",
+      "tests": "RRF fusion (encoder + decoder + masking chunks); tests contrastive reasoning across two architecture sections"
+    },
+    {
+      "id": "multihop_004",
+      "query": "How does the encoder output flow into the decoder, and what type of attention mechanism facilitates this?",
+      "ground_truth": "The encoder produces a sequence of continuous representations (memory). In each decoder layer, a multi-head cross-attention sub-layer attends over the encoder output: decoder queries come from the previous decoder sub-layer while keys and values come from the encoder output. This allows every decoder position to attend to all input positions.",
+      "relevant_chunk_ids": [
+        "pdf:transformer_technical_report:chunk_3",
+        "pdf:transformer_technical_report:chunk_4",
+        "pdf:transformer_technical_report:chunk_5",
+        "pdf:transformer_technical_report:chunk_6"
+      ],
+      "category": "multi-hop",
+      "difficulty": "hard",
+      "tests": "RRF fusion (encoder output + cross-attention chunks); tests multi-step information flow reasoning"
+    },
+    {
+      "id": "multihop_005",
+      "query": "How does the relationship between d_model and d_ff reflect the design trade-off in the feed-forward sub-layer?",
+      "ground_truth": "d_model=512 is the residual stream dimension while d_ff=2048 (4x larger) is the inner dimension of the two-layer feed-forward network. The expansion provides capacity for non-linear feature transformation before projecting back to d_model, allowing the FFN to store more information per position than the attention sub-layer alone.",
+      "relevant_chunk_ids": [
+        "pdf:transformer_technical_report:chunk_9",
+        "pdf:transformer_technical_report:chunk_10",
+        "pdf:transformer_technical_report:chunk_11"
+      ],
+      "category": "multi-hop",
+      "difficulty": "hard",
+      "tests": "RRF fusion (d_model + d_ff chunks); tests dimensional reasoning about FFN design"
+    },
+    {
+      "id": "multihop_006",
+      "query": "How does sinusoidal positional encoding interact with the word embeddings mathematically, and why was this design chosen?",
+      "ground_truth": "The positional encodings have the same dimension d_model as the embeddings and are simply added element-wise. The sinusoidal choice uses sine functions for even dimensions and cosine for odd dimensions with frequencies based on powers of 10000. The authors also tested learned positional embeddings and found nearly identical results.",
+      "relevant_chunk_ids": [
+        "pdf:transformer_technical_report:chunk_7",
+        "pdf:transformer_technical_report:chunk_8"
+      ],
+      "category": "multi-hop",
+      "difficulty": "hard",
+      "tests": "RRF fusion (positional encoding + embedding chunks); tests mathematical reasoning about PE design"
+    },
+    {
+      "id": "multihop_007",
+      "query": "The paper evaluates on both English-German and English-French translation. How do the base and big model BLEU scores and training costs compare across these two tasks?",
+      "ground_truth": "On English-to-German, the base model achieves 27.3 BLEU and the big model achieves 28.4 BLEU, exceeding the best prior result by more than 2 BLEU points. On English-to-French, the base model achieves 38.1 BLEU and the big model achieves 41.8 BLEU, a new single-model state-of-the-art. The base model costs 3.3 × 10^18 FLOPs while the big model costs 2.3 × 10^19 FLOPs — both significantly lower than competing models like ConvS2S.",
+      "relevant_chunk_ids": [
+        "pdf:transformer_technical_report:chunk_17",
+        "pdf:transformer_technical_report:chunk_18",
+        "pdf:transformer_technical_report:chunk_20",
+        "pdf:transformer_technical_report:chunk_21"
+      ],
+      "category": "multi-hop",
+      "difficulty": "hard",
+      "tests": "RRF fusion (results table + key findings chunks); tests comparative reasoning across two translation directions and model sizes"
+    },
+    {
+      "id": "multihop_008",
+      "query": "How does the scaled dot-product attention scaling factor sqrt(d_k) relate to the motivation described in the paper, and what problem does it solve with large d_k?",
+      "ground_truth": "For large d_k the dot products grow large in magnitude, pushing the softmax into regions with very small gradients. Dividing by sqrt(d_k) counteracts this by keeping the dot product variance roughly constant regardless of d_k. The paper states that the scaling factor 1/sqrt(d_k) prevents the dot products from growing large in magnitude, which would push the softmax into regions with very small gradients.",
+      "relevant_chunk_ids": [
+        "pdf:transformer_technical_report:chunk_5",
+        "pdf:transformer_technical_report:chunk_6"
+      ],
+      "category": "multi-hop",
+      "difficulty": "hard",
+      "tests": "RRF fusion (attention formula + scaling motivation chunks); tests causal reasoning about numerical stability"
+    },
+    {
+      "id": "multihop_009",
+      "query": "What three distinct ways does the transformer use multi-head attention, and how do they differ in which sequences supply the queries, keys, and values?",
+      "ground_truth": "1. Encoder self-attention: all three (Q, K, V) come from the previous encoder layer output — every position attends to all positions in the encoder. 2. Decoder self-attention (masked): Q, K, V all come from the decoder but a causal mask prevents attending to future positions. 3. Encoder-decoder (cross) attention: queries come from the decoder's previous layer, while keys and values come from the encoder output.",
+      "relevant_chunk_ids": [
+        "pdf:transformer_technical_report:chunk_4",
+        "pdf:transformer_technical_report:chunk_5",
+        "pdf:transformer_technical_report:chunk_6"
+      ],
+      "category": "multi-hop",
+      "difficulty": "hard",
+      "tests": "RRF fusion (all three attention-usage chunks); tests enumeration and differentiation of three sub-cases"
+    },
+    {
+      "id": "crossmodal_001",
+      "query": "How many sub-layers are visible in the encoder block in the architecture diagram, and what does the paper say each encoder layer contains?",
+      "ground_truth": "The architecture diagram shows 2 sub-layers in each encoder block: Multi-Head Attention and Feed Forward, each followed by Add & Norm. This matches the paper's description: each encoder layer has a multi-head self-attention sub-layer and a position-wise feed-forward sub-layer, each wrapped with a residual connection and layer normalization.",
+      "relevant_chunk_ids": [
+        "image:transformer_architecture:chunk_0",
+        "pdf:transformer_technical_report:chunk_3",
+        "pdf:transformer_technical_report:chunk_4"
+      ],
+      "category": "cross-modal",
+      "difficulty": "hard",
+      "tests": "image_global + PDF retrieval; tests consistency check between visual diagram and text description"
+    },
+    {
+      "id": "crossmodal_002",
+      "query": "In the architecture diagram, what component connects the encoder stack to the decoder stack, and how does the paper describe its function?",
+      "ground_truth": "The diagram shows arrows labeled 'K, V' from the encoder feeding into the 'Cross-Attention (Encoder-Decoder)' block of each decoder layer, with sub-text 'Keys + Values from encoder'. The paper describes this as encoder-decoder attention where the decoder queries attend over the encoder's output representations, allowing the decoder to focus on relevant parts of the input.",
+      "relevant_chunk_ids": [
+        "image:transformer_architecture:chunk_0",
+        "pdf:transformer_technical_report:chunk_4",
+        "pdf:transformer_technical_report:chunk_5"
+      ],
+      "category": "cross-modal",
+      "difficulty": "hard",
+      "tests": "image_global + PDF cross-attention chunks; tests identification of encoder→decoder connection across modalities"
+    },
+    {
+      "id": "crossmodal_003",
+      "query": "Does the architecture diagram show the positional encoding being added before or after the embedding layer, and is this consistent with the paper?",
+      "ground_truth": "The diagram shows positional encoding added to the embeddings at the bottom of both the encoder and decoder stacks, before the first attention layer. This is consistent with the paper, which states that positional encodings are added to the input embeddings at the bottom of the encoder and decoder stacks.",
+      "relevant_chunk_ids": [
+        "image:transformer_architecture:chunk_0",
+        "pdf:transformer_technical_report:chunk_7",
+        "pdf:transformer_technical_report:chunk_8"
+      ],
+      "category": "cross-modal",
+      "difficulty": "hard",
+      "tests": "image_global + PDF positional encoding chunks; tests spatial reading of diagram matched to paper formula"
+    },
+    {
+      "id": "crossmodal_004",
+      "query": "Based on both the video and the paper, what problem with recurrent neural networks does the transformer architecture primarily address?",
+      "ground_truth": "Both the video and paper highlight that RNNs process sequences sequentially — each step depends on the previous hidden state — which prevents parallelization during training and causes vanishing gradients that make it difficult to learn long-range dependencies. The transformer replaces recurrence with self-attention, enabling full parallelism and direct connections between any two sequence positions.",
+      "relevant_chunk_ids": [
+        "video:transformer_video:chunk_0",
+        "video:transformer_video:chunk_1",
+        "pdf:transformer_technical_report:chunk_0",
+        "pdf:transformer_technical_report:chunk_1"
+      ],
+      "category": "cross-modal",
+      "difficulty": "hard",
+      "tests": "video_clip + PDF intro chunks; tests synthesis of spoken explanation with written motivation"
+    },
+    {
+      "id": "crossmodal_005",
+      "query": "How does the audio explanation of self-attention align with the mathematical formulation in the technical report?",
+      "ground_truth": "The audio describes self-attention as a mechanism that allows every token to directly attend to every other token in a single step, using scaled dot-product attention with d_k = 64 per head. This aligns with the paper's formulation where each position computes a weighted sum of all value vectors, with weights determined by the softmax of scaled dot products between query and key vectors — Attention(Q, K, V) = softmax(QK^T / sqrt(d_k)) * V.",
+      "relevant_chunk_ids": [
+        "audio:transformer_audio:chunk_0",
+        "pdf:transformer_technical_report:chunk_5",
+        "pdf:transformer_technical_report:chunk_6"
+      ],
+      "category": "cross-modal",
+      "difficulty": "hard",
+      "tests": "audio_clip + PDF attention formula chunks; tests alignment of spoken description with formal math"
+    },
+    {
+      "id": "crossmodal_006",
+      "query": "What does the architecture diagram show in its KEY FORMULAS section about the attention computation, and does this match the attention formula in the paper?",
+      "ground_truth": "The KEY FORMULAS section at the bottom of the diagram displays the Scaled Dot-Product Attention formula: Attention(Q, K, V) = softmax(QK^T / sqrt(d_k)) · V. This matches the formula in the paper exactly, where the softmax output serves as the attention weight distribution that is multiplied by V to produce the aggregated output.",
+      "relevant_chunk_ids": [
+        "image:transformer_architecture:chunk_0",
+        "pdf:transformer_technical_report:chunk_5",
+        "pdf:transformer_technical_report:chunk_6"
+      ],
+      "category": "cross-modal",
+      "difficulty": "hard",
+      "tests": "image_global (formula section) + PDF formula chunks; tests reading formula text from diagram vs. equation in paper"
+    },
+    {
+      "id": "crossmodal_007",
+      "query": "The architecture diagram shows '×N' labels on both the encoder and decoder stacks. What does the video or paper say this N equals for the base model?",
+      "ground_truth": "According to the paper, N=6 for the base transformer model, meaning there are 6 stacked identical encoder layers and 6 stacked identical decoder layers. The diagram labels these as 'ENCODER STACK ×N (N=6 layers)' and 'DECODER STACK ×N (N=6 layers)'. The video's architecture slide also shows 'ENCODER ×6 layers' and 'DECODER ×6 layers'.",
+      "relevant_chunk_ids": [
+        "image:transformer_architecture:chunk_0",
+        "pdf:transformer_technical_report:chunk_2",
+        "video:transformer_video:chunk_1"
+      ],
+      "category": "cross-modal",
+      "difficulty": "hard",
+      "tests": "image_global (×N annotation) + PDF architecture chunks + video architecture slide; tests cross-modal corroboration of N=6"
+    },
+    {
+      "id": "crossmodal_008",
+      "query": "How does the video's explanation of the attention mechanism compare to the paper's description of why multi-head attention is preferred over single-head?",
+      "ground_truth": "The video explains that multiple attention heads allow the model to jointly attend across different representation subspaces, with 8 parallel heads each projecting to 64-dimensional subspaces. The paper states multi-head attention allows the model to jointly attend to information from different representation subspaces. The ablation study in the paper provides empirical evidence: reducing to a single head (h=1) drops BLEU by 2.5 points (from 25.8 to 23.3), demonstrating the importance of multiple heads.",
+      "relevant_chunk_ids": [
+        "video:transformer_video:chunk_2",
+        "pdf:transformer_technical_report:chunk_6",
+        "pdf:transformer_technical_report:chunk_7",
+        "pdf:transformer_technical_report:chunk_23"
+      ],
+      "category": "cross-modal",
+      "difficulty": "hard",
+      "tests": "video_clip + PDF multi-head attention + ablation chunks; tests spoken vs. written explanation of attention head diversity"
+    },
+    {
+      "id": "crossmodal_009",
+      "query": "What does the architecture diagram reveal about the output side of the decoder that the paper also describes in the generation process?",
+      "ground_truth": "The diagram shows the decoder output passing through a 'Linear + Softmax' stage that produces a vocabulary-sized probability vector for the next token. The paper describes this as the decoder generating an output sequence one element at a time, attending to the encoder output at each step.",
+      "relevant_chunk_ids": [
+        "image:transformer_architecture:chunk_0",
+        "pdf:transformer_technical_report:chunk_3",
+        "pdf:transformer_technical_report:chunk_4"
+      ],
+      "category": "cross-modal",
+      "difficulty": "hard",
+      "tests": "image_global (output stack) + PDF generation description chunks; tests decoder output path across modalities"
+    },
+    {
+      "id": "adversarial_001",
+      "query": "Does the transformer use convolutional layers to process sequences, similar to CNNs used in computer vision?",
+      "ground_truth": "No. The transformer does not use convolutional layers for sequence processing. The paper states it 'relied solely on a mechanism called self-attention to model dependencies between input and output positions' and 'eliminated recurrence entirely.' The architecture consists of self-attention mechanisms and position-wise feed-forward networks, with no convolutional components.",
+      "relevant_chunk_ids": [
+        "pdf:transformer_technical_report:chunk_0",
+        "pdf:transformer_technical_report:chunk_1",
+        "pdf:transformer_technical_report:chunk_3"
+      ],
+      "category": "adversarial",
+      "difficulty": "medium",
+      "tests": "adversarial premise: 'uses CNNs'; tests grounded refusal — correct answer must cite self-attention-only architecture"
+    },
+    {
+      "id": "adversarial_002",
+      "query": "Is the transformer a stateful model that maintains a hidden state between tokens the way an LSTM does?",
+      "ground_truth": "No. The transformer processes all positions in parallel rather than sequentially. It has no recurrent hidden state carried between steps. At inference time the decoder does generate tokens autoregressively, but this is implemented by re-running attention over all previously generated tokens — not by maintaining a compressed hidden state like an LSTM.",
+      "relevant_chunk_ids": [
+        "pdf:transformer_technical_report:chunk_0",
+        "pdf:transformer_technical_report:chunk_1",
+        "pdf:transformer_technical_report:chunk_3"
+      ],
+      "category": "adversarial",
+      "difficulty": "medium",
+      "tests": "adversarial premise: 'stateful like LSTM'; tests grounded refusal — correct answer must distinguish parallel vs. sequential"
+    },
+    {
+      "id": "adversarial_003",
+      "query": "Does the paper claim that the transformer outperforms all previous architectures across every NLP task tested?",
+      "ground_truth": "The paper does not make this blanket claim. It demonstrates state-of-the-art results specifically on WMT 2014 English-to-German and English-to-French translation tasks, and describes the transformer's adoption in other domains (computer vision, protein structure prediction, audio synthesis) in its Impact section. The results reported are scoped to machine translation benchmarks, not all NLP tasks.",
+      "relevant_chunk_ids": [
+        "pdf:transformer_technical_report:chunk_20",
+        "pdf:transformer_technical_report:chunk_21",
+        "pdf:transformer_technical_report:chunk_26"
+      ],
+      "category": "adversarial",
+      "difficulty": "medium",
+      "tests": "adversarial premise: 'beats all models on all tasks'; tests scope-limiting generation against an overfit claim"
+    },
+    {
+      "id": "adversarial_004",
+      "query": "Is the dropout rate for the base transformer model 0.2?",
+      "ground_truth": "No. The base model uses a dropout rate of 0.1, not 0.2. This is shown in the Training Configuration table (Table 1). The big model uses a higher dropout rate of 0.3. The ablation study further demonstrates dropout's importance: removing it entirely drops BLEU from 25.8 to 24.6 on English-to-German.",
+      "relevant_chunk_ids": [
+        "pdf:transformer_technical_report:chunk_19",
+        "pdf:transformer_technical_report:chunk_23"
+      ],
+      "category": "adversarial",
+      "difficulty": "easy",
+      "tests": "adversarial premise: 'dropout = 0.2'; tests exact numeric recall under a leading wrong value"
+    },
+    {
+      "id": "adversarial_005",
+      "query": "In the original 'Attention is All You Need' paper, are the positional encodings learned parameters or fixed sinusoidal functions?",
+      "ground_truth": "The paper uses fixed sinusoidal positional encodings (not learned). The authors did experiment with learned positional embeddings and found nearly identical results, as stated in Section 2.3 of the PDF and confirmed by the ablation study (Table 3), where learned positional encoding scored 25.7 BLEU compared to the base model's 25.8 BLEU.",
+      "relevant_chunk_ids": [
+        "pdf:transformer_technical_report:chunk_7",
+        "pdf:transformer_technical_report:chunk_8",
+        "pdf:transformer_technical_report:chunk_24"
+      ],
+      "category": "adversarial",
+      "difficulty": "medium",
+      "tests": "adversarial premise: 'positional encodings are learned'; tests recall of the fixed-vs-learned design decision"
+    },
+    {
+      "id": "adversarial_006",
+      "query": "Does the paper report that using 32 attention heads gives the best performance due to more representation subspaces?",
+      "ground_truth": "No. The ablation study shows that increasing to 32 heads actually reduces translation quality compared to the 8-head base model. When h=32, each head's dimension d_k = 512/32 = 16 becomes too small, and the model performs worse despite having more heads.",
+      "relevant_chunk_ids": [
+        "pdf:transformer_technical_report:chunk_23",
+        "pdf:transformer_technical_report:chunk_24"
+      ],
+      "category": "adversarial",
+      "difficulty": "medium",
+      "tests": "adversarial premise: '32 heads is best'; tests ablation-study recall to counter an intuitive-but-wrong claim"
+    },
+    {
+      "id": "adversarial_007",
+      "query": "Does the transformer paper prove that attention is sufficient to replace all forms of recurrence and convolution in all sequence modeling tasks?",
+      "ground_truth": "No. The paper demonstrates that self-attention alone is sufficient for the specific machine translation tasks tested (WMT 2014 EN→DE and EN→FR) and notes the transformer's subsequent broad adoption across domains including computer vision, protein structure prediction, and audio synthesis. However, these results do not constitute a formal proof of universal sufficiency — they demonstrate strong empirical performance on specific benchmarks.",
+      "relevant_chunk_ids": [
+        "pdf:transformer_technical_report:chunk_20",
+        "pdf:transformer_technical_report:chunk_21",
+        "pdf:transformer_technical_report:chunk_26",
+        "pdf:transformer_technical_report:chunk_27"
+      ],
+      "category": "adversarial",
+      "difficulty": "hard",
+      "tests": "adversarial premise: 'proved universal sufficiency'; tests generation scope limitation against overclaiming"
+    },
+    {
+      "id": "adversarial_008",
+      "query": "Is the dropout rate for the large transformer model the same as for the base model?",
+      "ground_truth": "No. The large transformer uses P_drop = 0.3, while the base model uses P_drop = 0.1. The large model has more parameters and requires stronger regularization to prevent overfitting.",
+      "relevant_chunk_ids": [
+        "pdf:transformer_technical_report:chunk_19",
+        "pdf:transformer_technical_report:chunk_23"
+      ],
+      "category": "adversarial",
+      "difficulty": "medium",
+      "tests": "adversarial premise: 'same dropout for base and large'; tests recall of per-variant hyperparameter difference"
+    },
+    {
+      "id": "adversarial_009",
+      "query": "Does the transformer architecture require that the input sequence and output sequence have the same length?",
+      "ground_truth": "No. The transformer handles variable-length input and output sequences independently. The encoder processes the full input sequence of arbitrary length, and the decoder generates the output sequence token-by-token until an end-of-sequence token is produced — these lengths are decoupled.",
+      "relevant_chunk_ids": [
+        "pdf:transformer_technical_report:chunk_3",
+        "pdf:transformer_technical_report:chunk_4"
+      ],
+      "category": "adversarial",
+      "difficulty": "easy",
+      "tests": "adversarial premise: 'input and output must be same length'; tests encoder-decoder decoupling recall"
+    },
+    {
+      "id": "adversarial_010",
+      "query": "Does the paper report that the base transformer model achieves 41.8 BLEU on WMT 2014 English-to-French?",
+      "ground_truth": "No. The 41.8 BLEU score on English-to-French belongs to the Transformer (big) model, not the base model. The base transformer model achieves 38.1 BLEU on English-to-French — a significant gap of 3.7 BLEU points below the big model. The big model's 41.8 represents a new single-model state-of-the-art at the time of publication.",
+      "relevant_chunk_ids": [
+        "pdf:transformer_technical_report:chunk_20",
+        "pdf:transformer_technical_report:chunk_21"
+      ],
+      "category": "adversarial",
+      "difficulty": "medium",
+      "tests": "adversarial premise: 'base model gets 41.8 on EN-FR'; tests precise numeric recall distinguishing base (38.1) from big (41.8) model scores"
+    },
+    {
+      "id": "outofscope_001",
+      "query": "How does BERT differ from the original transformer in its use of masked language modeling and bidirectional context?",
+      "ground_truth": "I don't have enough information to answer this. The corpus does not contain information about BERT — it covers only the original 'Attention is All You Need' transformer architecture.",
+      "relevant_chunk_ids": [],
+      "category": "out-of-scope",
+      "difficulty": "easy",
+      "tests": "no-answer detection: BERT is not in corpus; tests generation abstention"
+    },
+    {
+      "id": "outofscope_002",
+      "query": "What is the total number of parameters in GPT-3?",
+      "ground_truth": "I don't have enough information to answer this. The corpus does not contain information about GPT-3 or its parameter count.",
+      "relevant_chunk_ids": [],
+      "category": "out-of-scope",
+      "difficulty": "easy",
+      "tests": "no-answer detection: GPT-3 params not in corpus; tests generation abstention"
+    },
+    {
+      "id": "outofscope_003",
+      "query": "What are the estimated carbon emissions from training large-scale transformer models like GPT-4?",
+      "ground_truth": "I don't have enough information to answer this. The corpus does not cover environmental impact, carbon footprint, or training costs of GPT-4 or other large language models.",
+      "relevant_chunk_ids": [],
+      "category": "out-of-scope",
+      "difficulty": "easy",
+      "tests": "no-answer detection: carbon/training cost not in corpus; tests generation abstention"
+    },
+    {
+      "id": "outofscope_004",
+      "query": "How many total parameters does the base transformer model have?",
+      "ground_truth": "I don't have enough information to answer this. The corpus provides architectural hyperparameters (d_model=512, d_ff=2048, N=6, h=8) but does not report the total parameter count for either the base or big transformer model.",
+      "relevant_chunk_ids": [],
+      "category": "out-of-scope",
+      "difficulty": "easy",
+      "tests": "no-answer detection: parameter count not in corpus despite hyperparams being present; tests generation abstention when an answer seems derivable but isn't stated"
+    },
+    {
+      "id": "outofscope_005",
+      "query": "What is the maximum context length supported by Claude 3 Opus?",
+      "ground_truth": "I don't have enough information to answer this. The corpus contains no information about Claude models or Anthropic products.",
+      "relevant_chunk_ids": [],
+      "category": "out-of-scope",
+      "difficulty": "easy",
+      "tests": "no-answer detection: Claude models not in corpus; tests generation abstention with a plausible-sounding but absent topic"
+    }
+  ]
+}
