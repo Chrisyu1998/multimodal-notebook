@@ -1,21 +1,23 @@
 {
   "_meta": {
-    "version": "1.1",
+    "version": "1.0",
     "corpus_files": [
       "transformer_technical_report.pdf",
       "transformer_architecture.png",
-      "transformer_video.mp4",
-      "transformer_audio.mp3"
+      "transformer_video.mp4"
     ],
     "chunk_id_format": "{modality}:{filename}:chunk_{index}",
     "note": "relevant_chunk_ids use logical IDs resolved at eval time via the chunk_index + source metadata stored in ChromaDB. Empty list means out-of-scope (no answer expected in corpus).",
     "fields": {
       "difficulty": "easy | medium | hard",
       "tests": "pipeline component and aspect under test",
-      "source_modality": "present on factual questions only — pdf | image | video | audio",
+      "source_modality": "present on factual questions only — pdf | image | video",
       "ground_truth_status": {
-        "all_modalities": "VERIFIED — all ground truths validated against actual corpus files (PDF text, architecture image, video frames + narration, audio narration) as of v1.1"
+        "all_modalities": "VERIFIED — all ground truths validated against actual corpus files (PDF text, architecture image, video frames + narration) as of v1.0"
       }
+    },
+    "changelog": {
+      "v1.0": "Initial verified dataset (51 questions across 4 modalities)"
     }
   },
   "queries": [
@@ -224,28 +226,17 @@
       "tests": "video_clip chunk retrieval for scaling + multi-head explanation; tests spoken content extraction for technical detail"
     },
     {
-      "id": "factual_014_audio",
-      "query": "In the audio explanation, how does the speaker introduce the concept of self-attention?",
-      "ground_truth": "The speaker introduces self-attention by explaining that the transformer eliminated recurrence entirely and instead uses self-attention, which allows every token to directly attend to every other token in a single step. This is contrasted with recurrent models (LSTMs and GRUs) that process tokens one at a time, making training slow and making it hard to capture dependencies between distant parts of the sentence.",
+      "id": "factual_014_video",
+      "query": "In the video, what does the presenter say about the transformer's training results and how they compare to previous models?",
+      "ground_truth": "The video states that the transformer was trained on 8 NVIDIA P100 GPUs and achieved state-of-the-art results on machine translation benchmarks. On WMT 2014 English-to-German, the big model achieved 28.4 BLEU, surpassing all prior models by over 2 points. On English-to-French, it achieved 41.8 BLEU. The presenter emphasizes that these results came at a fraction of the training cost of competing models, with the base model training in approximately 12 hours.",
       "relevant_chunk_ids": [
-        "audio:transformer_audio:chunk_0"
+        "video:transformer_video:chunk_3",
+        "video:transformer_video:chunk_4"
       ],
       "category": "factual",
-      "source_modality": "audio",
+      "source_modality": "video",
       "difficulty": "medium",
-      "tests": "audio_clip chunk retrieval; tests transcript-based retrieval for self-attention introduction"
-    },
-    {
-      "id": "factual_015_audio",
-      "query": "According to the audio, what training details does the speaker mention for the base and big transformer models?",
-      "ground_truth": "The speaker states that the base model uses a dimension of 512, 8 attention heads, 6 layers, and a feed-forward dimension of 2048, trained for 100,000 steps in approximately 12 hours on eight NVIDIA P100 GPUs. The big model uses a dimension of 1024 with 16 heads, trained for 300,000 steps in approximately 3.5 days. On English-to-German the big transformer achieved 28.4 BLEU, surpassing all prior models by more than 2 points. On English-to-French it achieved 41.8 BLEU.",
-      "relevant_chunk_ids": [
-        "audio:transformer_audio:chunk_0"
-      ],
-      "category": "factual",
-      "source_modality": "audio",
-      "difficulty": "medium",
-      "tests": "audio_clip chunk retrieval for training configuration and benchmark results; tests transcript-based retrieval for multiple numeric facts"
+      "tests": "video_clip chunk retrieval for training results slide; tests spoken content extraction for benchmark numbers and training details"
     },
     {
       "id": "multihop_001",
@@ -418,19 +409,6 @@
       "tests": "video_clip + PDF intro chunks; tests synthesis of spoken explanation with written motivation"
     },
     {
-      "id": "crossmodal_005",
-      "query": "How does the audio explanation of self-attention align with the mathematical formulation in the technical report?",
-      "ground_truth": "The audio describes self-attention as a mechanism that allows every token to directly attend to every other token in a single step, using scaled dot-product attention with d_k = 64 per head. This aligns with the paper's formulation where each position computes a weighted sum of all value vectors, with weights determined by the softmax of scaled dot products between query and key vectors — Attention(Q, K, V) = softmax(QK^T / sqrt(d_k)) * V.",
-      "relevant_chunk_ids": [
-        "audio:transformer_audio:chunk_0",
-        "pdf:transformer_technical_report:chunk_5",
-        "pdf:transformer_technical_report:chunk_6"
-      ],
-      "category": "cross-modal",
-      "difficulty": "hard",
-      "tests": "audio_clip + PDF attention formula chunks; tests alignment of spoken description with formal math"
-    },
-    {
       "id": "crossmodal_006",
       "query": "What does the architecture diagram show in its KEY FORMULAS section about the attention computation, and does this match the attention formula in the paper?",
       "ground_truth": "The KEY FORMULAS section at the bottom of the diagram displays the Scaled Dot-Product Attention formula: Attention(Q, K, V) = softmax(QK^T / sqrt(d_k)) · V. This matches the formula in the paper exactly, where the softmax output serves as the attention weight distribution that is multiplied by V to produce the aggregated output.",
@@ -482,6 +460,18 @@
       "category": "cross-modal",
       "difficulty": "hard",
       "tests": "image_global (output stack) + PDF generation description chunks; tests decoder output path across modalities"
+    },
+    {
+      "id": "crossmodal_010",
+      "query": "The video's architecture slide shows encoder and decoder stacks. How does the video's visual representation compare to the detailed architecture diagram in terms of the components shown inside each stack?",
+      "ground_truth": "Both representations show detailed component breakdowns with hyperparameter values. The video slide (Slide 3) shows 'ENCODER ×6 layers' and 'DECODER ×6 layers' with labeled blocks including 'Multi-Head Self-Attention (h=8 heads, d_k=d_v=64)', 'Feed-Forward Network (d_ff=2048, ReLU)', 'Masked Self-Attention (Future tokens masked)', 'Cross-Attention (Enc→Dec) (Keys + Values from encoder)', and 'Add & Norm' after each sub-layer. The architecture diagram shows the same components using slightly different naming — 'Masked Multi-Head Self-Attention' instead of 'Masked Self-Attention', and 'Cross-Attention (Encoder-Decoder)' instead of '(Enc→Dec)'. Both show 'K, V' labels on the encoder-to-decoder connection. The key differences are that the diagram additionally includes an 'Encoder Output' description block between the stacks and a KEY FORMULAS & BENCHMARK NUMBERS section at the bottom with the attention formula and a Hyperparameter Summary table — content that appears on separate slides in the video. The video slide also uniquely shows 'Add & Norm + FFN' as a combined final decoder block with 'Linear → Softmax → output token' sub-text, while the image separates these into distinct 'Feed-Forward Network', 'Add & Norm', and 'Linear + Softmax' blocks.",
+      "relevant_chunk_ids": [
+        "video:transformer_video:chunk_1",
+        "image:transformer_architecture:chunk_0"
+      ],
+      "category": "cross-modal",
+      "difficulty": "hard",
+      "tests": "video_clip (architecture slide) + image_global chunk; tests comparison of video slide layout vs. static diagram — identifying naming differences and content distribution across modalities"
     },
     {
       "id": "adversarial_001",
@@ -611,12 +601,12 @@
     },
     {
       "id": "outofscope_001",
-      "query": "How does BERT differ from the original transformer in its use of masked language modeling and bidirectional context?",
-      "ground_truth": "I don't have enough information to answer this. The corpus does not contain information about BERT — it covers only the original 'Attention is All You Need' transformer architecture.",
+      "query": "What specific training dataset and tokenization strategy was used to train the original transformer, and how many sentence pairs did it contain?",
+      "ground_truth": "I don't have enough information to fully answer this. The corpus mentions the WMT 2014 English-to-German and English-to-French benchmarks but does not specify the exact training dataset composition, the number of sentence pairs, or the tokenization strategy (e.g., BPE vocabulary size) used during training.",
       "relevant_chunk_ids": [],
       "category": "out-of-scope",
-      "difficulty": "easy",
-      "tests": "no-answer detection: BERT is not in corpus; tests generation abstention"
+      "difficulty": "medium",
+      "tests": "no-answer detection: training dataset details and tokenization not in corpus despite benchmark names being mentioned; tests abstention on plausible-but-absent training specifics"
     },
     {
       "id": "outofscope_002",
@@ -639,11 +629,11 @@
     {
       "id": "outofscope_004",
       "query": "How many total parameters does the base transformer model have?",
-      "ground_truth": "I don't have enough information to answer this. The corpus provides architectural hyperparameters (d_model=512, d_ff=2048, N=6, h=8) but does not report the total parameter count for either the base or big transformer model.",
+      "ground_truth": "I don't have enough information to answer this. The corpus describes the transformer's hyperparameters (d_model, N, h, d_ff) but does not state the total parameter count for either the base or big model.",
       "relevant_chunk_ids": [],
       "category": "out-of-scope",
-      "difficulty": "easy",
-      "tests": "no-answer detection: parameter count not in corpus despite hyperparams being present; tests generation abstention when an answer seems derivable but isn't stated"
+      "difficulty": "medium",
+      "tests": "no-answer detection: parameter count not in corpus despite all hyperparameters being present; tests abstention on a calculable-but-unstated fact — the model should NOT attempt to compute the count from hyperparameters since the corpus never provides it"
     },
     {
       "id": "outofscope_005",
