@@ -11,3 +11,7 @@ pillow
 loguru
 tiktoken
 reportlab
+ffmpeg-python
+scenedetect
+opencv-python
+google-cloud-storage
