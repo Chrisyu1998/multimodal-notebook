@@ -11,6 +11,8 @@ Pipeline order:
 """
 
 import time
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, HTTPException
 from loguru import logger
 
@@ -23,6 +25,7 @@ from backend.services.generation import (
     GenerationConfigError,
     GenerationRetryableError,
 )
+from backend.services.query_logger import log_query
 from backend.services.retrieval import hybrid_search, rerank
 from backend.services.vectorstore import VectorStoreUnavailableError
 
@@ -104,6 +107,16 @@ async def query(request: QueryRequest) -> QueryResponse:
     logger.info(
         f"Query completed in {elapsed_ms:.1f}ms — {result['chunks_used']} chunks used"
         + (f", {result['media_chunks_degraded']} media chunk(s) degraded" if result["media_chunks_degraded"] else "")
+    )
+
+    log_query(
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        query_text=request.question,
+        latency_ms=elapsed_ms,
+        input_tokens=result.get("input_tokens", 0),
+        output_tokens=result.get("output_tokens", 0),
+        retrieval_strategy="hybrid",
+        reranker_used=True,
     )
 
     return QueryResponse(

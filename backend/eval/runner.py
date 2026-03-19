@@ -34,6 +34,7 @@ from backend.eval.judge import (
 )
 from backend.services import bm25_index
 from backend.services.generation import generate_answer
+from backend.services.query_logger import log_query
 from backend.services.retrieval import hybrid_search, rerank
 
 # ---------------------------------------------------------------------------
@@ -276,6 +277,15 @@ async def _run_query(item: dict, semaphore: asyncio.Semaphore) -> dict:
             logger.info(
                 f"Query {query_id} completed in {latency_ms:.1f}ms — "
                 f"{result['chunks_used']} chunks used"
+            )
+            log_query(
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                query_text=query,
+                latency_ms=latency_ms,
+                input_tokens=result.get("input_tokens", 0),
+                output_tokens=result.get("output_tokens", 0),
+                retrieval_strategy="hybrid",
+                reranker_used=True,
             )
         except Exception as exc:
             latency_ms = round((time.monotonic() - start) * 1000, 1)

@@ -101,3 +101,33 @@ class EvalRunDetail(BaseModel):
     dataset_version: str
     results: list[EvalQueryResult]
     summary: dict
+
+
+# ---------------------------------------------------------------------------
+# Metrics
+# ---------------------------------------------------------------------------
+
+class TimeseriesPoint(BaseModel):
+    """One day's aggregated query telemetry."""
+
+    date: str
+    avg_latency_ms: float
+    p50_latency_ms: float
+    p95_latency_ms: float
+    total_queries: int
+    avg_input_tokens: float
+    avg_output_tokens: float
+    estimated_cost_usd: float
+
+
+class MetricsSummary(BaseModel):
+    """All-time query telemetry totals."""
+
+    total_queries: int
+    avg_latency_ms: float
+    p50_latency_ms: float
+    p95_latency_ms: float
+    avg_input_tokens: float
+    avg_output_tokens: float
+    total_cost_usd: float
+    avg_cost_per_query: float

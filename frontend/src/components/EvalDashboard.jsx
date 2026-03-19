@@ -1,25 +1,47 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { fetchLatestRun, fetchRuns } from "../api/eval";
+import { fetchTimeseries, fetchMetricsSummary } from "../api/metrics";
 import EvalMetricsTable from "./EvalMetricsTable";
 import EvalComparisonTable from "./EvalComparisonTable";
+import SystemMetrics from "./SystemMetrics";
 
-const TABS = ["Metrics", "Comparison"];
+const TABS = ["Metrics", "Comparison", "System Metrics"];
+const REFRESH_INTERVAL_MS = 60_000;
 
 export default function EvalDashboard() {
   const [tab, setTab] = useState("Metrics");
   const [latestRun, setLatestRun] = useState(null);
   const [runs, setRuns] = useState([]);
+  const [timeseries, setTimeseries] = useState([]);
+  const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const intervalRef = useRef(null);
+
+  function loadAll() {
+    return Promise.all([
+      fetchLatestRun(),
+      fetchRuns(),
+      fetchTimeseries(),
+      fetchMetricsSummary(),
+    ]).then(([latest, allRuns, ts, sum]) => {
+      setLatestRun(latest);
+      setRuns(allRuns);
+      setTimeseries(ts);
+      setSummary(sum);
+    });
+  }
 
   useEffect(() => {
-    Promise.all([fetchLatestRun(), fetchRuns()])
-      .then(([latest, allRuns]) => {
-        setLatestRun(latest);
-        setRuns(allRuns);
-      })
+    loadAll()
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
+
+    intervalRef.current = setInterval(() => {
+      loadAll().catch(() => {});
+    }, REFRESH_INTERVAL_MS);
+
+    return () => clearInterval(intervalRef.current);
   }, []);
 
   if (loading) {
@@ -48,7 +70,7 @@ export default function EvalDashboard() {
             {latestRun && (
               <p className="text-xs text-gray-400 mt-0.5">
                 Latest run: {latestRun.timestamp.slice(0, 19)} ·{" "}
-                {latestRun.results.length} queries
+                {latestRun.results.length} queries · auto-refreshes every 60s
               </p>
             )}
           </div>
@@ -81,6 +103,9 @@ export default function EvalDashboard() {
       <div className="p-6">
         {tab === "Metrics" && <EvalMetricsTable run={latestRun} />}
         {tab === "Comparison" && <EvalComparisonTable runs={runs} />}
+        {tab === "System Metrics" && (
+          <SystemMetrics summary={summary} timeseries={timeseries} />
+        )}
       </div>
     </div>
   );
