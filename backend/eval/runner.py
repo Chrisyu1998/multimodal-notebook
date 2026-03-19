@@ -26,6 +26,12 @@ from pathlib import Path
 from loguru import logger
 
 import backend.config as config
+from backend.eval.judge import (
+    score_correctness,
+    score_hallucination,
+    score_faithfulness,
+    score_context_precision,
+)
 from backend.services import bm25_index
 from backend.services.generation import generate_answer
 from backend.services.retrieval import hybrid_search, rerank
@@ -98,45 +104,71 @@ def _format_retrieved_chunks(chunks: list[dict]) -> list[dict]:
 
 
 def _compute_summary(results: list[dict]) -> dict:
-    """Compute aggregate latency and failure statistics from per-query results."""
-    failed: int = sum(
-        1 for r in results if r["generated_answer"].startswith("ERROR:")
-    )
-    latencies: list[float] = [
-        r["latency_ms"]
-        for r in results
-        if not r["generated_answer"].startswith("ERROR:")
-    ]
+    """Compute aggregate latency, token, failure, and judge score statistics."""
+    failed: int = sum(1 for r in results if r.get("status") == "error")
+    successful = [r for r in results if r.get("status") == "ok"]
+    latencies: list[float] = [r["latency_ms"] for r in successful]
     avg_latency = round(sum(latencies) / len(latencies), 1) if latencies else 0.0
     p50 = round(_percentile(latencies, 50), 1) if latencies else 0.0
     p95 = round(_percentile(latencies, 95), 1) if latencies else 0.0
+
+    def _avg_score(key: str) -> float:
+        vals = [r["scores"][key] for r in successful if r.get("scores")]
+        return round(sum(vals) / len(vals), 4) if vals else 0.0
+
     return {
         "total_queries": len(results),
         "failed_queries": failed,
         "avg_latency_ms": avg_latency,
         "p50_latency_ms": p50,
         "p95_latency_ms": p95,
+        "total_input_tokens": sum(r.get("input_tokens", 0) for r in results),
+        "total_output_tokens": sum(r.get("output_tokens", 0) for r in results),
+        "avg_correctness": _avg_score("correctness"),
+        "avg_hallucination_rate": _avg_score("hallucination_rate"),
+        "avg_faithfulness": _avg_score("faithfulness"),
+        "avg_context_precision": _avg_score("context_precision"),
     }
 
 
 def _init_db(db_path: str) -> None:
-    """Create the eval_runs table in the SQLite database if it does not exist."""
+    """Create the eval_runs table in the SQLite database if it does not exist.
+
+    Also migrates existing tables by adding judge score columns when absent.
+    """
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
     try:
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS eval_runs (
-                run_id           TEXT PRIMARY KEY,
-                timestamp        TEXT NOT NULL,
-                dataset_version  TEXT NOT NULL,
-                num_queries      INTEGER NOT NULL,
-                avg_latency_ms   REAL NOT NULL,
-                p95_latency_ms   REAL NOT NULL,
-                failed_queries   INTEGER NOT NULL
+                run_id                TEXT PRIMARY KEY,
+                timestamp             TEXT NOT NULL,
+                dataset_version       TEXT NOT NULL,
+                num_queries           INTEGER NOT NULL,
+                avg_latency_ms        REAL NOT NULL,
+                p95_latency_ms        REAL NOT NULL,
+                failed_queries        INTEGER NOT NULL,
+                avg_correctness       REAL NOT NULL DEFAULT 0.0,
+                avg_hallucination_rate REAL NOT NULL DEFAULT 0.0,
+                avg_faithfulness      REAL NOT NULL DEFAULT 0.0,
+                avg_context_precision REAL NOT NULL DEFAULT 0.0
             )
             """
         )
+        # Migrate existing databases that predate the judge score columns.
+        for col in (
+            "avg_correctness",
+            "avg_hallucination_rate",
+            "avg_faithfulness",
+            "avg_context_precision",
+        ):
+            try:
+                conn.execute(
+                    f"ALTER TABLE eval_runs ADD COLUMN {col} REAL NOT NULL DEFAULT 0.0"
+                )
+            except sqlite3.OperationalError:
+                pass  # Column already exists — expected on fresh runs.
         conn.commit()
     finally:
         conn.close()
@@ -151,8 +183,10 @@ def _insert_run_metadata(db_path: str, run_data: dict) -> None:
             """
             INSERT INTO eval_runs
               (run_id, timestamp, dataset_version, num_queries,
-               avg_latency_ms, p95_latency_ms, failed_queries)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+               avg_latency_ms, p95_latency_ms, failed_queries,
+               avg_correctness, avg_hallucination_rate,
+               avg_faithfulness, avg_context_precision)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 run_data["run_id"],
@@ -162,6 +196,10 @@ def _insert_run_metadata(db_path: str, run_data: dict) -> None:
                 summary["avg_latency_ms"],
                 summary["p95_latency_ms"],
                 summary["failed_queries"],
+                summary["avg_correctness"],
+                summary["avg_hallucination_rate"],
+                summary["avg_faithfulness"],
+                summary["avg_context_precision"],
             ),
         )
         conn.commit()
@@ -195,14 +233,15 @@ def _write_results(run_data: dict, results_dir: str) -> Path:
 async def _run_query(item: dict, semaphore: asyncio.Semaphore) -> dict:
     """Run the full RAG pipeline for one golden-dataset entry.
 
-    Acquires the semaphore before calling into the retrieval/generation
-    services so at most _CONCURRENCY_LIMIT queries are in-flight at once.
-    All three service calls (hybrid_search, rerank, generate_answer) are
-    synchronous and are offloaded to the thread pool via asyncio.to_thread
-    to keep the event loop unblocked.
+    The RAG pipeline (hybrid_search → rerank → generate_answer) runs inside
+    the semaphore so at most _CONCURRENCY_LIMIT queries are in-flight at once.
+    After the semaphore is released, all four judge calls run concurrently via
+    asyncio.gather — they are independent of the RAG services and do not need
+    to be rate-limited by the same slot.
 
-    On any exception the generated_answer is set to "ERROR: <message>" and
-    the result is returned normally so the run continues for remaining queries.
+    On any pipeline exception, status="error" is returned immediately with
+    scores=None so the run continues and _compute_summary can distinguish
+    pipeline failures from judge failures without string-matching answers.
 
     Args:
         item:      One entry from the golden dataset 'queries' array.
@@ -217,6 +256,7 @@ async def _run_query(item: dict, semaphore: asyncio.Semaphore) -> dict:
     source_modality: str = item.get("source_modality", "")
     ground_truth: str = item.get("ground_truth", "")
 
+    # --- RAG pipeline (rate-limited by semaphore) ---
     async with semaphore:
         logger.info(f"Running query {query_id} [{category}]: {query!r}")
         start = time.monotonic()
@@ -231,26 +271,12 @@ async def _run_query(item: dict, semaphore: asyncio.Semaphore) -> dict:
             result: dict = await asyncio.to_thread(
                 generate_answer, query, reranked
             )
-
             latency_ms = round((time.monotonic() - start) * 1000, 1)
+            generated_answer: str = result["answer"]
             logger.info(
                 f"Query {query_id} completed in {latency_ms:.1f}ms — "
                 f"{result['chunks_used']} chunks used"
             )
-
-            return {
-                "query_id": query_id,
-                "query": query,
-                "category": category,
-                "source_modality": source_modality,
-                "generated_answer": result["answer"],
-                "ground_truth": ground_truth,
-                "retrieved_chunks": _format_retrieved_chunks(reranked),
-                "latency_ms": latency_ms,
-                "input_tokens": result.get("input_tokens", 0),
-                "output_tokens": result.get("output_tokens", 0),
-            }
-
         except Exception as exc:
             latency_ms = round((time.monotonic() - start) * 1000, 1)
             logger.error(
@@ -261,13 +287,56 @@ async def _run_query(item: dict, semaphore: asyncio.Semaphore) -> dict:
                 "query": query,
                 "category": category,
                 "source_modality": source_modality,
+                "status": "error",
                 "generated_answer": f"ERROR: {exc}",
                 "ground_truth": ground_truth,
                 "retrieved_chunks": [],
                 "latency_ms": latency_ms,
                 "input_tokens": 0,
                 "output_tokens": 0,
+                "scores": None,
+                "reasoning": None,
             }
+
+    # --- Judge scoring (concurrent, outside semaphore — independent of RAG services) ---
+    correctness, hallucination, faithfulness, precision = await asyncio.gather(
+        asyncio.to_thread(score_correctness, query, ground_truth, generated_answer, reranked),
+        asyncio.to_thread(score_hallucination, query, ground_truth, generated_answer, reranked),
+        asyncio.to_thread(score_faithfulness, query, ground_truth, generated_answer, reranked),
+        asyncio.to_thread(score_context_precision, query, ground_truth, generated_answer, reranked),
+    )
+    logger.info(
+        f"Query {query_id} judged — correctness={correctness['score']} "
+        f"hallucination={hallucination['score']} "
+        f"faithfulness={faithfulness['score']} "
+        f"context_precision={precision['score']}"
+    )
+
+    return {
+        "query_id": query_id,
+        "query": query,
+        "category": category,
+        "source_modality": source_modality,
+        "status": "ok",
+        "generated_answer": generated_answer,
+        "ground_truth": ground_truth,
+        "retrieved_chunks": _format_retrieved_chunks(reranked),
+        "latency_ms": latency_ms,
+        "input_tokens": result.get("input_tokens", 0),
+        "output_tokens": result.get("output_tokens", 0),
+        "scores": {
+            "correctness": correctness["score"],
+            "hallucination_rate": hallucination["score"],
+            "faithfulness": faithfulness["score"],
+            "context_precision": precision["score"],
+        },
+        "reasoning": {
+            "correctness": correctness["reasoning"],
+            "hallucination": hallucination["reasoning"],
+            "faithfulness": faithfulness["reasoning"],
+            "context_precision": precision["reasoning"],
+        },
+    }
 
 
 # ---------------------------------------------------------------------------
