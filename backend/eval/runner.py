@@ -299,18 +299,35 @@ async def _run_query(item: dict, semaphore: asyncio.Semaphore) -> dict:
             }
 
     # --- Judge scoring (concurrent, outside semaphore — independent of RAG services) ---
-    correctness, hallucination, faithfulness, precision = await asyncio.gather(
-        asyncio.to_thread(score_correctness, query, ground_truth, generated_answer, reranked),
-        asyncio.to_thread(score_hallucination, query, ground_truth, generated_answer, reranked),
-        asyncio.to_thread(score_faithfulness, query, ground_truth, generated_answer, reranked),
-        asyncio.to_thread(score_context_precision, query, ground_truth, generated_answer, reranked),
-    )
-    logger.info(
-        f"Query {query_id} judged — correctness={correctness['score']} "
-        f"hallucination={hallucination['score']} "
-        f"faithfulness={faithfulness['score']} "
-        f"context_precision={precision['score']}"
-    )
+    try:
+        correctness, hallucination, faithfulness, precision = await asyncio.gather(
+            asyncio.to_thread(score_correctness, query, ground_truth, generated_answer, reranked),
+            asyncio.to_thread(score_hallucination, query, ground_truth, generated_answer, reranked),
+            asyncio.to_thread(score_faithfulness, query, ground_truth, generated_answer, reranked),
+            asyncio.to_thread(score_context_precision, query, ground_truth, generated_answer, reranked),
+        )
+        logger.info(
+            f"Query {query_id} judged — correctness={correctness['score']} "
+            f"hallucination={hallucination['score']} "
+            f"faithfulness={faithfulness['score']} "
+            f"context_precision={precision['score']}"
+        )
+        scores = {
+            "correctness": correctness["score"],
+            "hallucination_rate": hallucination["score"],
+            "faithfulness": faithfulness["score"],
+            "context_precision": precision["score"],
+        }
+        reasoning = {
+            "correctness": correctness["reasoning"],
+            "hallucination": hallucination["reasoning"],
+            "faithfulness": faithfulness["reasoning"],
+            "context_precision": precision["reasoning"],
+        }
+    except Exception as exc:
+        logger.error(f"Query {query_id} judge scoring failed: {exc}")
+        scores = None
+        reasoning = None
 
     return {
         "query_id": query_id,
@@ -324,18 +341,8 @@ async def _run_query(item: dict, semaphore: asyncio.Semaphore) -> dict:
         "latency_ms": latency_ms,
         "input_tokens": result.get("input_tokens", 0),
         "output_tokens": result.get("output_tokens", 0),
-        "scores": {
-            "correctness": correctness["score"],
-            "hallucination_rate": hallucination["score"],
-            "faithfulness": faithfulness["score"],
-            "context_precision": precision["score"],
-        },
-        "reasoning": {
-            "correctness": correctness["reasoning"],
-            "hallucination": hallucination["reasoning"],
-            "faithfulness": faithfulness["reasoning"],
-            "context_precision": precision["reasoning"],
-        },
+        "scores": scores,
+        "reasoning": reasoning,
     }
 
 

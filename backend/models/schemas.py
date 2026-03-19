@@ -54,22 +54,50 @@ class QueryResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Eval  (stubs — filled out in Week 3)
+# Eval
 # ---------------------------------------------------------------------------
 
-class EvalRunRequest(BaseModel):
-    """Payload for POST /eval/run."""
-    # TODO (Week 3): add run config options (subset size, prompt variant, etc.)
-    pass
+from typing import Optional
 
 
-class EvalResult(BaseModel):
-    """Single row from the eval results store."""
-    # TODO (Week 3): define fields (query_id, score, latency, tokens, etc.)
-    pass
+class EvalRunMeta(BaseModel):
+    """Lightweight summary row for one eval run (from SQLite)."""
+
+    run_id: str
+    timestamp: str
+    dataset_version: str
+    num_queries: int
+    avg_latency_ms: float
+    p95_latency_ms: float
+    failed_queries: int
+    avg_correctness: float
+    avg_hallucination_rate: float
+    avg_faithfulness: float
+    avg_context_precision: float
 
 
-class EvalRunResponse(BaseModel):
-    """Summary returned after an eval run completes."""
-    # TODO (Week 3): aggregate metrics, run_id, timestamp
-    pass
+class EvalQueryResult(BaseModel):
+    """Per-query result from a single eval run."""
+
+    query_id: str
+    query: str
+    category: str
+    source_modality: str
+    status: str
+    generated_answer: str
+    ground_truth: str
+    latency_ms: float
+    input_tokens: int
+    output_tokens: int
+    scores: Optional[dict] = None
+    reasoning: Optional[dict] = None
+
+
+class EvalRunDetail(BaseModel):
+    """Full eval run payload — summary + per-query results."""
+
+    run_id: str
+    timestamp: str
+    dataset_version: str
+    results: list[EvalQueryResult]
+    summary: dict

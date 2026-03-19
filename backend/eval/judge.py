@@ -96,9 +96,16 @@ Ground truth answer:
 Generated answer:
 {generated_answer}
 
-Reason step by step through each factual claim in the generated answer, comparing \
-it to the ground truth. Then assign a score from 0 to 5. Fractional scores such as \
-3.5 or 4.5 are encouraged when the answer falls between two anchor points:
+Special case — out-of-scope queries: if the ground truth indicates the question \
+cannot be answered from the provided documents (e.g. "not in the corpus", \
+"no information available", "out of scope"), and the generated answer correctly \
+declines to answer or states it lacks sufficient information, assign a score of 5. \
+Only penalise if the model fabricates an answer instead of declining.
+
+For all other queries, reason step by step through each factual claim in the \
+generated answer, comparing it to the ground truth. Then assign a score from 0 to 5. \
+Fractional scores such as 3.5 or 4.5 are encouraged when the answer falls between \
+two anchor points:
   5 — Perfectly correct; all facts match ground truth.
   4 — Mostly correct; minor imprecision or one small omission.
   3 — Partially correct; one clearly wrong or missing key detail.

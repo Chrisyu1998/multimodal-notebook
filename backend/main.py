@@ -10,10 +10,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
 import backend.config as config
-from backend.routers import upload, query
+from backend.routers import upload, query, eval as eval_router
 from backend.services import bm25_index
-
-# TODO (Week 3): from backend.routers import eval
 
 
 # ---------------------------------------------------------------------------
@@ -64,7 +62,7 @@ app.add_middleware(
 
 app.include_router(upload.router, prefix="/upload", tags=["upload"])
 app.include_router(query.router, prefix="/query", tags=["query"])
-# TODO (Week 3): app.include_router(eval.router, prefix="/eval", tags=["eval"])
+app.include_router(eval_router.router, prefix="/eval", tags=["eval"])
 
 
 # ---------------------------------------------------------------------------
