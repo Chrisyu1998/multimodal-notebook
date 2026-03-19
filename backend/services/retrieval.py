@@ -319,6 +319,15 @@ _IMAGE_SCOPE_RE = re.compile(
     r"what (does|is) (shown|labeled|depicted) in)\b",
     re.IGNORECASE,
 )
+# Text/paper scope — used only to detect cross-modal queries that reference
+# the written paper alongside a video or image source.  We do NOT filter to
+# text-only chunks on a text-scope match: BM25 already ranks PDF chunks highly
+# for "paper" queries and an aggressive filter risks excluding the specific PDF
+# chunks needed when the reranker scores them just below the threshold.
+_TEXT_SCOPE_RE = re.compile(
+    r"\b(paper|the paper|document|report|according to the paper)\b",
+    re.IGNORECASE,
+)
 
 _VIDEO_MODALITIES: frozenset[str] = frozenset({"video_summary", "video_clip"})
 _IMAGE_MODALITIES_SET: frozenset[str] = frozenset({"image_global", "image_local"})
@@ -333,9 +342,33 @@ def _filter_by_modality_scope(query: str, chunks: list[dict]) -> list[dict]:
 
     Falls back to the full list when:
       - No scope keywords are detected.
+      - BOTH video AND image scope keywords are detected (cross-modal query that
+        requires evidence from multiple modalities — filtering either source type
+        would prevent the model from synthesising across them).
       - Filtering would remove ALL chunks (safety guard).
     """
-    if _VIDEO_SCOPE_RE.search(query):
+    has_video_scope = bool(_VIDEO_SCOPE_RE.search(query))
+    has_image_scope = bool(_IMAGE_SCOPE_RE.search(query))
+    has_text_scope = bool(_TEXT_SCOPE_RE.search(query))
+
+    # Cross-modal queries reference more than one source type simultaneously
+    # (e.g. "compare the video's explanation to the architecture diagram", or
+    # "how does the video's explanation compare to the paper's description").
+    # Filtering any single source type would prevent cross-source synthesis.
+    cross_modal = (
+        (has_video_scope and has_image_scope)
+        or (has_video_scope and has_text_scope)
+        or (has_image_scope and has_text_scope)
+    )
+    if cross_modal:
+        logger.info(
+            "modality-routing: cross-modal query detected "
+            f"(video={has_video_scope} image={has_image_scope} text={has_text_scope}) — "
+            "keeping full candidate list for cross-source synthesis"
+        )
+        return chunks
+
+    if has_video_scope:
         filtered = [c for c in chunks if c.get("modality", "") in _VIDEO_MODALITIES]
         if filtered:
             logger.info(
@@ -348,7 +381,7 @@ def _filter_by_modality_scope(query: str, chunks: list[dict]) -> list[dict]:
             "keeping full candidate list"
         )
 
-    elif _IMAGE_SCOPE_RE.search(query):
+    elif has_image_scope:
         filtered = [c for c in chunks if c.get("modality", "") in _IMAGE_MODALITIES_SET]
         if filtered:
             logger.info(
@@ -371,7 +404,15 @@ def _filter_by_modality_scope(query: str, chunks: list[dict]) -> list[dict]:
 _RERANK_THRESHOLD: float = 0.25
 """Minimum rerank score to keep a chunk.  Chunks below this are noise —
 topically adjacent but don't contain the specific fact needed to answer the
-query.  Always keep at least 1 chunk so the pipeline never sends empty context.
+query.
+"""
+
+_RERANK_MIN_FALLBACK: int = 3
+"""Minimum number of chunks to keep when all candidates fall below
+_RERANK_THRESHOLD.  Multi-hop reasoning queries often require several chunks
+that each score modestly individually but together contain the full answer;
+keeping at least 3 prevents the pipeline from starving the generator of
+necessary context.
 """
 
 
@@ -526,17 +567,19 @@ def rerank(query: str, chunks: list[dict], top_k: int = 5) -> list[dict]:
 
     ranked = sorted(candidates_for_rerank, key=lambda c: c["rerank_score"], reverse=True)
 
-    # Fix 3: drop chunks below _RERANK_THRESHOLD — they are topically adjacent but
-    # do not contain the specific answer.  The threshold (0.25) is higher than the
-    # old floor of 0.0 so low-signal chunks no longer dilute context precision.
-    # Always keep at least 1 chunk so the pipeline never sends empty context.
+    # Drop chunks below _RERANK_THRESHOLD — they are topically adjacent but
+    # do not contain the specific answer.  The threshold (0.25) filters noise
+    # while _RERANK_MIN_FALLBACK ensures multi-hop queries always receive
+    # enough context: individual chunks for multi-hop questions often score
+    # modestly alone but are collectively sufficient to answer the question.
     top_candidates = ranked[:top_k]
     filtered = [c for c in top_candidates if c["rerank_score"] >= _RERANK_THRESHOLD]
     if not filtered:
-        filtered = top_candidates[:1]
+        fallback_n = min(_RERANK_MIN_FALLBACK, len(top_candidates))
+        filtered = top_candidates[:fallback_n]
         logger.warning(
             f"rerank: all chunks below threshold {_RERANK_THRESHOLD} — "
-            "keeping top-1 as fallback context"
+            f"keeping top-{fallback_n} as fallback context"
         )
 
     logger.info(

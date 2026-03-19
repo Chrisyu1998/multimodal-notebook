@@ -60,9 +60,15 @@ INSTRUCTIONS:
 - Cite every claim inline with [N] where N is the source number.
 - When the answer is not explicitly stated but can be derived by combining facts \
 from multiple sources, synthesize them explicitly and cite each source used.
-- If the sources do not contain enough information, say exactly: \
-"I don't have enough information to answer this."
-- Do not make up information.\
+- If the sources do not contain enough information to answer the question fully, \
+say exactly: "I don't have enough information to answer this." Do NOT estimate, \
+infer, or fill in missing details using general knowledge — even partial answers \
+must stay strictly within what the sources explicitly state.
+- Do not make up information. Do not add context, caveats, or examples beyond \
+what is explicitly stated in the sources.
+- For yes/no questions, begin with a direct "Yes" or "No" before explaining. \
+Carefully assess the exact scope of what the sources demonstrate — distinguish \
+between empirical results on specific tasks and universal proofs or guarantees.\
 """
 
 # ---------------------------------------------------------------------------
