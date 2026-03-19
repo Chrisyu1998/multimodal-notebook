@@ -57,6 +57,12 @@ def collection_is_empty() -> bool:
     return col.count() == 0
 
 
+def get_doc_count() -> int:
+    """Return the number of chunks stored in the ChromaDB collection."""
+    col = _require_collection()
+    return col.count()
+
+
 def _chunk_id(file_hash: str, chunk_index: int) -> str:
     """Return a stable deduplication ID derived from file content hash + position."""
     raw = f"{file_hash}:{chunk_index}".encode()

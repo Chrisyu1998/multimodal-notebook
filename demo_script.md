@@ -1,107 +1,99 @@
-# Demo Script — 3-Minute Live Walkthrough
+# Demo Script — 3-Minute Portfolio Walkthrough
 
-**Goal:** Show the full pipeline end-to-end in three minutes. Upload a document, run three queries that each highlight a different technical capability, and point to the console logs to make the pipeline visible.
+**Total runtime:** ~3 minutes
+**Format:** Four timed beats. Each beat has talking points and what to have visible on screen.
 
-**Recommended test document:** A technical PDF with tables and charts (e.g., an earnings report, research paper, or product specification). Ideal: 10–20 pages, has a table of contents, contains specific named entities (product names, version numbers, dollar figures) AND conceptual prose.
-
----
-
-## Before You Start (30 seconds of prep)
-
-1. Have the terminal visible side-by-side with the browser tab.
-2. Run the backend with `--log-level info` so all loguru output is visible.
-3. Clear the terminal so logs from the demo are clean.
-4. Have the document ready to drag-and-drop.
+**Before you start:**
+- Backend running (`uvicorn backend.main:app --reload`), terminal visible side-by-side with browser
+- Browser at `http://localhost:5173`, starting on the **Chat** tab
+- A technical PDF ready to drag-and-drop — ideally 10–20 pages with a TOC, named entities (product names, version numbers), and conceptual prose (e.g., an earnings report or research paper)
+- Eval Dashboard tab already loaded so the chart renders instantly when you switch
 
 ---
 
-## Step 1 — Upload the Document (45 seconds)
-
-**What to do:** Drag the PDF onto the upload zone. Watch the status label change: "Uploading..." → "Indexing..." → "Ready — N chunks indexed".
+## Beat 1 — What the system does and why (0:00 – 0:30)
 
 **Talking points:**
 
-> "The file hits the `/upload` endpoint. The backend reads the PDF with PyMuPDF, extracts the table of contents, and splits the text into 800-token chunks with 100-token overlap, resetting at section boundaries so no chunk straddles two topics. While that's happening, any images in the document get a dual treatment: one embedding for the full page and one per detected region of interest — so if you ask about a specific chart later, the system can surface that exact crop."
+> "This is a multimodal RAG system — Retrieval-Augmented Generation. You upload a document, image, or video. The system indexes it using both keyword search and semantic vector search. When you ask a question, it retrieves the most relevant content from your corpus, reranks it, and sends the top five chunks to Gemini 2.5 Flash to generate a grounded answer with inline citations."
 
-> "After chunking, the backend calls Gemini Embedding 2 in batches of 20 and writes the embeddings to ChromaDB. In parallel, the text chunks are added to a BM25 keyword index that persists to disk. That BM25 index is what lets us do keyword matching later — it's rebuilt incrementally and loaded at startup."
-
-**Watch for in the logs:**
-```
-INFO  | Chunked <filename> → 47 chunks
-INFO  | Embedding batch 1/3 (20 chunks)...
-INFO  | BM25 index rebuilt — 47 documents total
-INFO  | Ingestion complete | file_hash=abc123 | chunks=47 | elapsed=8.3s
-```
+> "The key word is *grounded*. The model is constrained to cite every claim as [1], [2], etc. and is instructed to say 'I don't have enough information' rather than guess. That constraint is what separates a useful RAG system from a hallucination machine. The second tab is an eval dashboard that quantifies how well that constraint holds up — using a 50-query golden dataset scored by Gemini-as-judge on correctness, faithfulness, and hallucination rate."
 
 ---
 
-## Step 2 — Query 1: Keyword-Dependent Question (45 seconds)
+## Beat 2 — Live demo: upload → retrieve → answer (0:30 – 1:30)
 
-**Run this query:** Something with a specific named entity that only appears verbatim in the document — a product name, model number, version string, or proper noun. Example: *"What were the Q3 revenue figures for the Enterprise segment?"*
+### Upload (15 sec)
 
-**Talking points:**
+Drag the PDF onto the upload zone. Watch the status badge: **Uploading → Indexing → Ready**.
 
-> "This query is designed to stress-test keyword retrieval. The phrase 'Q3 revenue' and 'Enterprise segment' are exact strings that appear in the document. A pure vector search might surface conceptually similar content but miss the specific table row with those figures. BM25 catches it because it rewards exact term frequency weighted by rarity across the corpus."
+> "The file hits `/upload`. PyMuPDF parses it TOC-aware — chunk boundaries reset at section headings so a chunk never straddles two unrelated topics. Gemini Embedding 2 embeds the chunks in batches of 20. At the same time, the text chunks go into a BM25 keyword index that's persisted to disk and loaded at startup. ChromaDB is the single source of truth for embeddings."
 
-> "Notice in the logs: the system runs HyDE first — Gemini Flash writes a 2–3 sentence hypothetical answer and we embed *that* instead of the raw question. The BM25 search still runs against the original query text, not the hypothetical. Then we fuse the two ranked lists with Reciprocal Rank Fusion."
-
-**Watch for in the logs:**
+**Watch in the terminal:**
 ```
-INFO  | HyDE expansion | hypothesis="Enterprise segment revenue for Q3 reached..."
-INFO  | BM25 top-3: [chunk_12 score=4.21, chunk_8 score=3.77, chunk_19 score=2.88]
-INFO  | Vector top-3: [chunk_12 score=0.89, chunk_31 score=0.84, chunk_8 score=0.81]
-INFO  | RRF fusion → 20 unique candidates
-INFO  | Rerank complete | top5=[12, 8, 19, 31, 7] | elapsed=1.2s
+INFO | Chunked report.pdf → 52 chunks
+INFO | Embedding batch 1/3 (20 chunks)
+INFO | BM25 index rebuilt — 52 documents total
+INFO | Ingestion complete | elapsed=9.1s
 ```
 
-> "See chunk_12 ranking #1 in both BM25 and vector? When a chunk wins both lists it gets a heavily boosted RRF score. The reranker then confirms it belongs at the top. The final answer cites [1] for that chunk specifically."
+### Ask a keyword-dependent question (20 sec)
+
+Type a query with a specific named entity: *"What were the Q3 revenue figures for the Enterprise segment?"*
+
+> "This query is designed to stress-test keyword retrieval — 'Q3 revenue' and 'Enterprise segment' appear verbatim in the document. A pure vector search might surface conceptually similar content and miss the exact table row. BM25 catches it."
+
+> "But before searching, the system runs HyDE — Hypothetical Document Embedding. Gemini Flash writes a short hypothetical answer and we embed *that* instead of the raw question. A question and its answer occupy different regions of embedding space; HyDE bridges that gap."
+
+**Show the logs:**
+```
+INFO | HyDE | hypothesis="Enterprise segment revenue for Q3 reached $2.1B..."
+INFO | BM25 top-3:   [chunk_12 score=4.21, chunk_8 score=3.77, chunk_19 score=2.88]
+INFO | Vector top-3: [chunk_12 score=0.91, chunk_31 score=0.84, chunk_8 score=0.80]
+INFO | RRF fusion → 20 unique candidates
+INFO | Rerank complete | top5=[12, 8, 19, 31, 7] | elapsed=1.2s
+```
+
+> "chunk_12 ranks #1 in both BM25 and vector — that chunk gets a heavily boosted RRF score. The reranker then sees all 20 candidates at once and confirms it belongs at the top."
+
+### Show the answer and citations (25 sec)
+
+Point to the answer pane.
+
+> "The answer cites [1] and [2] — those map to chunk_12 on page 4 and chunk_8 on page 7. Click either citation to see the exact excerpt that supports the claim. If you ask something the document doesn't cover, the model returns 'I don't have enough information' — I can show that too if you want."
 
 ---
 
-## Step 3 — Query 2: Semantic / Conceptual Question (45 seconds)
+## Beat 3 — Eval Dashboard walkthrough (1:30 – 2:30)
 
-**Run this query:** Something conceptual that doesn't match any exact phrase in the document. Example: *"What are the biggest risks to growth next year?"* or *"How does the company plan to stay competitive?"*
+Switch to the **Eval Dashboard** tab.
 
-**Talking points:**
+### Metrics table (20 sec)
 
-> "This is the opposite of the last query. No exact phrase in the document says 'risks to growth.' But the document probably has paragraphs about 'macroeconomic headwinds,' 'supply chain uncertainty,' or 'competitive pressure.' Vector search handles this because Gemini Embedding 2 understands that 'risks to growth' and 'macroeconomic headwinds' are semantically related."
+> "Each row is one eval run — the pipeline ran against 50 hand-crafted queries with ground-truth answers. The columns are correctness, faithfulness, hallucination rate, and context precision, each scored 0–5 by Gemini-as-judge. The latest run is at the top."
 
-> "HyDE is especially powerful here. The raw question 'What are the biggest risks?' is very short and vague. The hypothetical answer Gemini generates is 2–3 sentences about the specific kinds of risks a company of this type faces — and *that* embedding lands much closer to the relevant chunks in embedding space."
+> "I chose LLM-as-judge over BLEU or ROUGE because BLEU measures n-gram overlap — it penalises valid paraphrases and can't detect fluent hallucinations. An LLM judge evaluates semantic correctness and whether claims are grounded in the retrieved sources, which are the two things that actually matter for a RAG system."
 
-**Watch for in the logs:**
-```
-INFO  | HyDE expansion | hypothesis="The company faces headwinds including rising input costs,
-       competitive pressure from new entrants, and potential regulatory changes..."
-INFO  | Rerank complete | top5=[3, 22, 15, 9, 28] | elapsed=1.4s
-INFO  | Generation complete | tokens_used=1847 | thinking_tokens=412 | elapsed=6.1s
-```
+### Before/after comparison (20 sec)
 
-> "The answer should cite 2–3 distinct sections of the document. That's the grounding working — the model is instructed to only claim what the sources support and to say 'I don't have enough information' otherwise."
+Select two runs with different configurations to show the diff table.
 
----
+> "This table is the core workflow for prompt engineering. I ran the eval before adding HyDE and after. Correctness went from 3.2 to 3.8 and hallucination rate dropped from 0.9 to 0.4. That's a measurable improvement from one retrieval change — and now it's in the database so I can always come back to it."
 
-## Step 4 — Query 3: Multi-Hop / Citation Quality Question (30 seconds)
+### Latency chart (20 sec)
 
-**Run this query:** Something that requires synthesizing information from two different parts of the document. Example: *"How does the company's stated strategy compare to its actual capital allocation?"* or *"Are the growth projections consistent with the risks described elsewhere in the report?"*
+Point to the p50/p95 latency trend.
 
-**Talking points:**
-
-> "This query tests citation quality. A good RAG system doesn't just retrieve one relevant chunk — it pulls from multiple sections and synthesizes them. The reranker's job here is critical: it sees all 20 RRF candidates at once and can make relative quality judgments. A chunk that partially addresses the question might rank lower than two chunks that together form a complete answer."
-
-> "Watch the source citations in the response. You should see [1] and [2] pointing to different pages — the strategy section and the financial section, for example. The Gemini 2.5 Flash CoT thinking budget means the model reasons through how those two pieces fit together before producing the answer."
-
-**Watch for in the logs:**
-```
-INFO  | Rerank complete | top5=[4, 17, 6, 22, 11] | elapsed=1.3s
-INFO  | Context build | text_chunks=3 | image_chunks=2 | degraded=0
-INFO  | Citation validation | valid=[1,2,3,4,5] | hallucinated=[]
-INFO  | Generation complete | chunks_used=5 | elapsed=8.7s
-```
-
-> "The `hallucinated=[]` line is the citation validator — it checks that every `[N]` the model outputs corresponds to a real chunk we sent. If the model invented a citation, it would appear here and the system would log a warning."
+> "p50 is around 3.5 seconds, p95 is around 9 seconds. The tail latency is from queries that trigger longer CoT thinking budgets. This chart makes it visible when a model config change blows up latency — for example, increasing the thinking budget from 1024 to 4096 tokens pushes p95 past 15 seconds."
 
 ---
 
-## Wrap-Up (15 seconds)
+## Beat 4 — Closing: what's next (2:30 – 3:00)
 
-> "The full pipeline is: HyDE expansion → BM25 + vector search in parallel → RRF fusion → LLM reranking → CoT generation with strict grounding. Every stage exists because removing it measurably hurts answer quality: vector-only misses exact matches, no reranking sends noise to the generator, and no grounding constraint produces hallucinations. The eval dashboard — coming in Week 3 — will quantify exactly how much each stage contributes using a 50-query golden dataset scored by Gemini-as-judge."
+> "Three things I'd add to take this to production scale:"
+
+> "**Vertex AI Matching Engine** instead of ChromaDB — managed approximate nearest-neighbour search that handles hundreds of millions of vectors with sub-100ms latency guarantees. ChromaDB is the right call for local development but doesn't scale beyond a few million chunks."
+
+> "**Streaming responses** via Server-Sent Events — right now the answer only appears when generation is complete. With Gemini's streaming API and a small SSE endpoint on the FastAPI side, the first tokens appear in under a second. The UX difference is significant for complex queries with long CoT."
+
+> "**Fine-tuned reranker** — the current reranker is a general-purpose Gemini Flash call. Training a lightweight cross-encoder on domain-specific query/document pairs from the eval logs would improve top-5 precision by 10–15 % based on published numbers for similar setups, at a fraction of the cost per query."

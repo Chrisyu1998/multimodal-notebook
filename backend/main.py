@@ -3,6 +3,7 @@ FastAPI application entry point.
 Registers CORS middleware, mounts routers, and logs config on startup.
 """
 
+import sqlite3
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -12,6 +13,7 @@ from loguru import logger
 import backend.config as config
 from backend.routers import upload, query, eval as eval_router, metrics as metrics_router
 from backend.services import bm25_index
+from backend.services.vectorstore import get_doc_count, VectorStoreUnavailableError
 
 
 # ---------------------------------------------------------------------------
@@ -72,8 +74,50 @@ app.include_router(metrics_router.router, prefix="/metrics", tags=["metrics"])
 
 @app.get("/health")
 async def health() -> dict:
-    """Liveness probe — returns status and current environment."""
-    return {"status": "ok", "environment": config.ENVIRONMENT}
+    """System status probe — returns environment, ChromaDB doc count, BM25 index size,
+    SQLite eval run count, and GCS bucket name."""
+    # ChromaDB
+    chroma_status = "ok"
+    chroma_doc_count = 0
+    try:
+        chroma_doc_count = get_doc_count()
+    except VectorStoreUnavailableError as exc:
+        chroma_status = f"unavailable: {exc}"
+
+    # BM25
+    bm25_size = bm25_index.get_index_size()
+
+    # SQLite eval run count
+    eval_run_count = 0
+    try:
+        conn = sqlite3.connect(config.EVAL_DB_PATH)
+        try:
+            row = conn.execute("SELECT COUNT(*) FROM eval_runs").fetchone()
+            eval_run_count = row[0] if row else 0
+        finally:
+            conn.close()
+    except Exception:
+        pass  # DB may not exist yet on a fresh install
+
+    return {
+        "status": "ok",
+        "environment": config.ENVIRONMENT,
+        "chroma": {
+            "status": chroma_status,
+            "doc_count": chroma_doc_count,
+            "collection": config.CHROMA_COLLECTION_NAME,
+        },
+        "bm25": {
+            "index_size": bm25_size,
+        },
+        "eval": {
+            "run_count": eval_run_count,
+            "db_path": config.EVAL_DB_PATH,
+        },
+        "gcs": {
+            "bucket": config.GCS_BUCKET_NAME,
+        },
+    }
 
 
 # ---------------------------------------------------------------------------

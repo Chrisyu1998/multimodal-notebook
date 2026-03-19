@@ -94,7 +94,7 @@ A production-grade Retrieval-Augmented Generation system that lets you upload PD
 
 ### Environment Variables
 
-Create `backend/.env`:
+Create `.env` in the **project root** (not inside `backend/`):
 
 ```bash
 # Required
@@ -106,6 +106,15 @@ ENVIRONMENT=development
 HOST=127.0.0.1
 PORT=8000
 CHROMA_PERSIST_DIR=./chroma_db
+CHROMA_COLLECTION_NAME=rag_chunks
+TMP_UPLOAD_DIR=./tmp
+BM25_TOP_K=20
+VECTOR_TOP_K=20
+RERANK_TOP_K=5
+EVAL_DB_PATH=./backend/eval/eval_results.db
+EVAL_DATASET_PATH=./backend/eval/golden_dataset.json
+EVAL_RESULTS_DIR=./evals
+EVAL_JUDGE_MODEL=gemini-2.5-pro
 GENERATION_THINKING_BUDGET=1024
 ```
 
@@ -142,6 +151,25 @@ npm run dev
 Open `http://localhost:5173`. API at `http://localhost:8000`.
 
 Health check: `curl http://localhost:8000/health`
+
+### Running the Eval Suite
+
+```bash
+# Full run — all 50 golden queries
+python -m backend.eval.runner
+
+# Dry run — first 5 queries only (fast sanity check, ~2 min)
+python -m backend.eval.runner --dry-run
+
+# Filter by category
+python -m backend.eval.runner --category factual
+python -m backend.eval.runner --category multi-hop
+python -m backend.eval.runner --category cross-modal
+python -m backend.eval.runner --category adversarial
+python -m backend.eval.runner --category out-of-scope
+```
+
+Results are written to `./evals/results_<timestamp>.json`. Run metadata (latency percentiles, judge scores) is persisted to `./backend/eval/eval_results.db` and surfaced live in the **Eval Dashboard** tab of the UI.
 
 ### Quick API Test
 
@@ -224,6 +252,40 @@ Output: top 5 chunks with `rerank_score` (0.0–1.0). These 5 are the only chunk
 The 5 reranked chunks are assembled into a multimodal context and sent to **Gemini 2.5 Flash** with a strict system prompt: answer only from the provided sources, cite every claim inline as `[N]`, and return "I don't have enough information" if the answer isn't in the context.
 
 The model uses **Chain-of-Thought thinking** (1024 token budget) before producing its final response. This internal reasoning step reduces hallucinations and improves faithfulness. The response includes the answer text, source citations with page numbers and relevance scores, and operational metrics (chunks used, model name, degraded media count).
+
+---
+
+## Key Engineering Decisions
+
+### Hybrid Search over Vector-Only
+
+Pure vector search excels at semantic similarity but fails on exact-match queries — model names, paper titles, version numbers, and acronyms are averaged away during embedding and produce poor cosine similarity. BM25 captures these signals with its TF-IDF weighting. Reciprocal Rank Fusion merges both ranked lists without requiring score normalisation, which is critical because raw BM25 and cosine scores live on incompatible scales while ranks are always comparable.
+
+### HyDE (Hypothetical Document Embeddings)
+
+A raw user query ("what causes gradient vanishing?") and its ideal answer chunk ("gradient vanishing occurs when…") occupy different regions of embedding space — questions and answers have different linguistic form. HyDE closes this gap by generating a plausible hypothetical answer first and embedding that instead of the raw query. In practice this shifts retrieval recall by roughly 10–20 % on long-form factual questions at no additional latency on the critical path (HyDE runs concurrently with BM25 query tokenisation).
+
+### LLM-as-Judge over BLEU / ROUGE
+
+BLEU and ROUGE measure n-gram overlap between generated and reference text. They penalise valid paraphrases and, critically, cannot detect factual hallucinations that are fluent and lexically similar to the ground truth. An LLM judge evaluates semantic correctness, groundedness in the retrieved context, and whether claims in the answer are supported by the cited source — the three properties that matter for a RAG system. The tradeoff is cost and non-determinism; both are acceptable given the 50-query evaluation cadence and the structured 0–5 scoring rubric that constrains judge variance.
+
+### Gemini Embedding 2 over OpenAI Embeddings
+
+The corpus contains PDFs, images, and video. Maintaining separate embedding models per modality would require separate ChromaDB namespaces and modality-routing logic at query time. Gemini Embedding 2 accepts text, image bytes, and video clips natively and produces embeddings in a shared vector space. This makes cross-modal retrieval (a diagram answering a text query) possible with a single ChromaDB collection and no routing code.
+
+---
+
+## Interview Talking Points
+
+- **End-to-end pipeline, no framework magic.** The hybrid search, RRF fusion, HyDE expansion, and LLM reranking are all implemented from scratch rather than delegated to LangChain or LlamaIndex. This demonstrates understanding of the trade-offs at each stage and makes the system easier to debug and iterate on.
+
+- **Multimodal-native design.** Using Gemini Embedding 2 as the single embedding model across text, images, and video is an architectural choice that enables cross-modal retrieval — a diagram in a PDF answering a text question — with one vector index and no modality-routing logic. This is a non-trivial design decision with real implications for index structure and query latency.
+
+- **Production eval pipeline.** The LLM-as-judge setup with four independent metrics (correctness, hallucination rate, faithfulness, context precision) mirrors what a production ML team would ship. It makes regressions detectable and prompt changes measurable — both essential for responsible iteration on a RAG system at any scale.
+
+- **Cost-aware architecture.** Every model choice was made with cost and latency in mind. Gemini 2.5 Flash is ~20× cheaper than 1.5 Pro with comparable faithfulness. The reranker reuses the same Flash model as generation, avoiding an additional API dependency. Chunking aggressively deduplicated via SHA-256 prevents re-embedding unchanged files.
+
+- **Retrieval quality fundamentals.** The BM25 + vector + RRF + reranker stack is the same pattern used in production search systems at scale. Being able to explain why each layer exists and what failure mode it addresses — exact-match gaps, semantic drift, score scale mismatch, context window budget pressure — demonstrates depth beyond "I used a RAG library."
 
 ---
 

@@ -133,6 +133,11 @@ def load_index() -> None:
     logger.info(f"BM25 index loaded from disk ({len(_corpus_chunks)} chunks).")
 
 
+def get_index_size() -> int:
+    """Return the number of chunks currently loaded in the BM25 index."""
+    return len(_corpus_chunks)
+
+
 def search_bm25(query: str, top_k: int = 20) -> list[dict]:
     """Return the top_k chunks most relevant to *query* via BM25 keyword scoring.
 
