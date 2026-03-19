@@ -25,6 +25,7 @@ Design notes:
 """
 
 import json
+import re
 from typing import Any
 
 from google import genai
@@ -302,6 +303,78 @@ def hybrid_search(query: str, top_k: int = 20, use_hyde: bool = True) -> list[di
     return merged
 
 
+# ---------------------------------------------------------------------------
+# Modality routing
+# ---------------------------------------------------------------------------
+
+# Patterns that signal the query is scoped to a specific source modality.
+# When matched, chunks from other modalities are filtered out before reranking
+# so the reranker never scores a PDF chunk for a "what does the video say…" query.
+_VIDEO_SCOPE_RE = re.compile(
+    r"\b(video|presenter|says in the video|according to the video|in the video)\b",
+    re.IGNORECASE,
+)
+_IMAGE_SCOPE_RE = re.compile(
+    r"\b(diagram|architecture diagram|figure|image|in the (image|diagram|figure)|"
+    r"what (does|is) (shown|labeled|depicted) in)\b",
+    re.IGNORECASE,
+)
+
+_VIDEO_MODALITIES: frozenset[str] = frozenset({"video_summary", "video_clip"})
+_IMAGE_MODALITIES_SET: frozenset[str] = frozenset({"image_global", "image_local"})
+
+
+def _filter_by_modality_scope(query: str, chunks: list[dict]) -> list[dict]:
+    """Drop chunks whose modality doesn't match an explicit source scope in the query.
+
+    If the query says "according to the video …" we remove PDF and image chunks
+    before reranking — they would score high on topical overlap but the judge
+    (and the user) only want video-sourced evidence.
+
+    Falls back to the full list when:
+      - No scope keywords are detected.
+      - Filtering would remove ALL chunks (safety guard).
+    """
+    if _VIDEO_SCOPE_RE.search(query):
+        filtered = [c for c in chunks if c.get("modality", "") in _VIDEO_MODALITIES]
+        if filtered:
+            logger.info(
+                f"modality-routing: video scope detected — "
+                f"kept {len(filtered)}/{len(chunks)} video chunks"
+            )
+            return filtered
+        logger.warning(
+            "modality-routing: video scope detected but no video chunks available — "
+            "keeping full candidate list"
+        )
+
+    elif _IMAGE_SCOPE_RE.search(query):
+        filtered = [c for c in chunks if c.get("modality", "") in _IMAGE_MODALITIES_SET]
+        if filtered:
+            logger.info(
+                f"modality-routing: image/diagram scope detected — "
+                f"kept {len(filtered)}/{len(chunks)} image chunks"
+            )
+            return filtered
+        logger.warning(
+            "modality-routing: image scope detected but no image chunks available — "
+            "keeping full candidate list"
+        )
+
+    return chunks
+
+
+# ---------------------------------------------------------------------------
+# Reranker helpers
+# ---------------------------------------------------------------------------
+
+_RERANK_THRESHOLD: float = 0.25
+"""Minimum rerank score to keep a chunk.  Chunks below this are noise —
+topically adjacent but don't contain the specific fact needed to answer the
+query.  Always keep at least 1 chunk so the pipeline never sends empty context.
+"""
+
+
 def _build_rerank_parts(query: str, chunks: list[dict]) -> list[types.Part]:
     """Build an interleaved multimodal content list for a single Gemini rerank call.
 
@@ -321,12 +394,19 @@ def _build_rerank_parts(query: str, chunks: list[dict]) -> list[types.Part]:
     """
     header = (
         "You are a relevance reranker for a retrieval-augmented generation system.\n\n"
-        "Score each passage below for how relevant it is to answering the query.\n\n"
+        "Score each passage for how useful it is to directly answer the query.\n\n"
         "Respond with ONLY a JSON array — no explanation, no markdown fences:\n"
         '[{"id": <1-indexed int>, "score": <float 0.0–1.0>}, ...]\n\n'
-        "Where 1.0 = directly and completely answers the query,\n"
-        "      0.5 = partially relevant,\n"
-        "      0.0 = completely unrelated.\n\n"
+        "Scoring rubric:\n"
+        "  1.0 = passage explicitly contains the specific fact(s) needed to answer the query\n"
+        "  0.7 = passage contains most of the answer but is missing one key detail\n"
+        "  0.5 = passage contains related facts that contribute to the answer but do not\n"
+        "        answer it directly (e.g. provides context, partial data, or supporting info)\n"
+        "  0.2 = passage mentions the topic but does not contain the specific answer\n"
+        "        (e.g. architecture diagram that labels a component without explaining it)\n"
+        "  0.0 = completely unrelated OR the query is scoped to a specific source\n"
+        "        (e.g. 'in the video', 'in the diagram') and this passage is from a\n"
+        "        different source type\n\n"
         f"Query: {query}\n\nPassages:\n"
     )
     # The Gemini SDK accepts a mixed list of strings and Part objects, so plain
@@ -382,6 +462,15 @@ def rerank(query: str, chunks: list[dict], top_k: int = 5) -> list[dict]:
     pass.  Falls back to the existing RRF order if the API call or JSON parsing
     fails.
 
+    Pre-processing:
+      - Modality routing: if the query is scoped to a specific source (e.g.
+        "according to the video"), chunks from other modalities are dropped
+        before the Gemini call so the reranker only sees relevant candidates.
+
+    Post-processing:
+      - Chunks below _RERANK_THRESHOLD are dropped as noise (topically related
+        but not answer-bearing).  At least 1 chunk is always kept.
+
     Args:
         query:   The original user question.
         chunks:  Candidate chunks from hybrid_search(), up to 20.
@@ -393,12 +482,20 @@ def rerank(query: str, chunks: list[dict], top_k: int = 5) -> list[dict]:
     """
     if not chunks:
         return []
-    if len(chunks) <= top_k:
-        for c in chunks[:top_k]:
-            c["rerank_score"] = c.get("score", 0.0)
-        return chunks[:top_k]
 
-    rerank_parts = _build_rerank_parts(query, chunks)
+    # Fix 2: filter to the query's target modality before reranking
+    candidates_for_rerank = _filter_by_modality_scope(query, chunks)
+
+    # Only skip the reranker when there is literally nothing to rank.
+    # The old guard was `<= top_k`, which fired when the modality filter
+    # reduced the pool to exactly top_k candidates — bypassing Gemini scoring
+    # and leaving chunks in raw RRF order, hurting context precision.
+    if len(candidates_for_rerank) <= 1:
+        for c in candidates_for_rerank:
+            c["rerank_score"] = c.get("score", 0.0)
+        return candidates_for_rerank
+
+    rerank_parts = _build_rerank_parts(query, candidates_for_rerank)
 
     try:
         response = _client.models.generate_content(
@@ -406,6 +503,8 @@ def rerank(query: str, chunks: list[dict], top_k: int = 5) -> list[dict]:
             contents=rerank_parts,
             config=types.GenerateContentConfig(temperature=0.0),
         )
+        if response.text is None:
+            raise ValueError("Reranker returned empty response (possible safety filter)")
         raw = response.text.strip()
         # Strip markdown fences if the model wraps the array in ```json … ```
         if raw.startswith("```"):
@@ -418,30 +517,32 @@ def rerank(query: str, chunks: list[dict], top_k: int = 5) -> list[dict]:
         }
     except Exception as exc:
         logger.warning(f"Reranker failed ({exc}) — falling back to RRF order.")
-        for c in chunks[:top_k]:
+        for c in candidates_for_rerank[:top_k]:
             c["rerank_score"] = c.get("score", 0.0)
-        return chunks[:top_k]
+        return candidates_for_rerank[:top_k]
 
-    for i, chunk in enumerate(chunks):
+    for i, chunk in enumerate(candidates_for_rerank):
         chunk["rerank_score"] = id_to_score.get(i + 1, 0.0)
 
-    ranked = sorted(chunks, key=lambda c: c["rerank_score"], reverse=True)
+    ranked = sorted(candidates_for_rerank, key=lambda c: c["rerank_score"], reverse=True)
 
-    # Drop zero-score chunks — the reranker explicitly scored them 0.0 = completely
-    # unrelated.  Passing them to generation adds noise and increases hallucination
-    # risk.  Always keep at least 1 chunk (top by RRF score) so the pipeline never
-    # sends empty context.
-    candidates = ranked[:top_k]
-    filtered = [c for c in candidates if c["rerank_score"] > 0.0]
+    # Fix 3: drop chunks below _RERANK_THRESHOLD — they are topically adjacent but
+    # do not contain the specific answer.  The threshold (0.25) is higher than the
+    # old floor of 0.0 so low-signal chunks no longer dilute context precision.
+    # Always keep at least 1 chunk so the pipeline never sends empty context.
+    top_candidates = ranked[:top_k]
+    filtered = [c for c in top_candidates if c["rerank_score"] >= _RERANK_THRESHOLD]
     if not filtered:
-        filtered = candidates[:1]
+        filtered = top_candidates[:1]
         logger.warning(
-            "rerank: all chunks scored 0.0 — keeping top-1 as fallback context"
+            f"rerank: all chunks below threshold {_RERANK_THRESHOLD} — "
+            "keeping top-1 as fallback context"
         )
 
     logger.info(
-        f"rerank: {len(filtered)}/{len(candidates)} chunks kept after zero-score filter "
-        f"(scores: {[round(c['rerank_score'], 3) for c in filtered]})"
+        f"rerank: {len(filtered)}/{len(top_candidates)} chunks kept "
+        f"(threshold={_RERANK_THRESHOLD}, "
+        f"scores: {[round(c['rerank_score'], 3) for c in filtered]})"
     )
     for i, c in enumerate(filtered):
         logger.debug(

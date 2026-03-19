@@ -34,8 +34,9 @@ function Cell({ value, metric, fmt }) {
   );
 }
 
-function avgOf(rows, key) {
-  const vals = rows.map((r) => r.scores?.[key]).filter((v) => v != null);
+function avgOf(rows, key, excludeCategory = null) {
+  const filtered = excludeCategory ? rows.filter((r) => r.category !== excludeCategory) : rows;
+  const vals = filtered.map((r) => r.scores?.[key]).filter((v) => v != null);
   if (!vals.length) return null;
   return vals.reduce((a, b) => a + b, 0) / vals.length;
 }
@@ -102,7 +103,7 @@ export default function EvalMetricsTable({ run }) {
               <Cell value={avgOf(okRows, "correctness")} metric="correctness" fmt={(v) => v.toFixed(2)} />
               <Cell value={avgOf(okRows, "hallucination_rate")} metric="hallucination_rate" fmt={(v) => v.toFixed(3)} />
               <Cell value={avgOf(okRows, "faithfulness")} metric="faithfulness" fmt={(v) => v.toFixed(2)} />
-              <Cell value={avgOf(okRows, "context_precision")} metric="context_precision" fmt={(v) => v.toFixed(3)} />
+              <Cell value={avgOf(okRows, "context_precision", "out-of-scope")} metric="context_precision" fmt={(v) => v.toFixed(3)} />
               <td className="px-3 py-2 text-gray-500 text-xs">
                 {okRows.length ? (okRows.reduce((s, r) => s + r.latency_ms, 0) / okRows.length).toFixed(0) : "—"} ms
               </td>

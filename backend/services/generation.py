@@ -58,6 +58,8 @@ document sources. The sources may include text passages, images, and video keyfr
 INSTRUCTIONS:
 - Answer using ONLY the provided sources. Do not use outside knowledge.
 - Cite every claim inline with [N] where N is the source number.
+- When the answer is not explicitly stated but can be derived by combining facts \
+from multiple sources, synthesize them explicitly and cite each source used.
 - If the sources do not contain enough information, say exactly: \
 "I don't have enough information to answer this."
 - Do not make up information.\

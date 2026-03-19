@@ -43,7 +43,7 @@ from backend.services.retrieval import hybrid_search, rerank
 
 _DATASET_VERSION: str = "1.0"
 _DRY_RUN_LIMIT: int = 5
-_CONCURRENCY_LIMIT: int = 5
+_CONCURRENCY_LIMIT: int = 2
 
 
 # ---------------------------------------------------------------------------
@@ -113,8 +113,13 @@ def _compute_summary(results: list[dict]) -> dict:
     p50 = round(_percentile(latencies, 50), 1) if latencies else 0.0
     p95 = round(_percentile(latencies, 95), 1) if latencies else 0.0
 
-    def _avg_score(key: str) -> float:
-        vals = [r["scores"][key] for r in successful if r.get("scores")]
+    def _avg_score(key: str, exclude_category: Optional[str] = None) -> float:
+        vals = [
+            r["scores"][key]
+            for r in successful
+            if r.get("scores")
+            and (exclude_category is None or r.get("category") != exclude_category)
+        ]
         return round(sum(vals) / len(vals), 4) if vals else 0.0
 
     return {
@@ -128,7 +133,11 @@ def _compute_summary(results: list[dict]) -> dict:
         "avg_correctness": _avg_score("correctness"),
         "avg_hallucination_rate": _avg_score("hallucination_rate"),
         "avg_faithfulness": _avg_score("faithfulness"),
-        "avg_context_precision": _avg_score("context_precision"),
+        # Out-of-scope queries are excluded from context precision: the corpus
+        # contains no relevant chunks by definition, so cp=0 for a correct
+        # refusal penalises good behaviour. Correctness already captures whether
+        # the model declined appropriately.
+        "avg_context_precision": _avg_score("context_precision", exclude_category="out-of-scope"),
     }
 
 
